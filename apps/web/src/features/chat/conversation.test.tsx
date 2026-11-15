@@ -142,6 +142,7 @@ describe("MessageList", () => {
         error_code: "rate_limit",
         error_message: "The model's rate limit was hit.",
         partial_text: "Half an",
+        detail: "models/old is retired; use models/new",
         message_ids: ["a"],
         requeued: false,
       },
@@ -149,6 +150,7 @@ describe("MessageList", () => {
     render(<MessageList state={s} {...props} />);
     expect(screen.getByText("The model's rate limit was hit.")).toBeInTheDocument();
     expect(screen.getByText("Half an")).toBeInTheDocument();
+    expect(screen.getByText(/Provider said: models\/old is retired/)).toBeInTheDocument();
   });
 
   it("renders the empty state", () => {

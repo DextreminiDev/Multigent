@@ -157,6 +157,9 @@ function FailedMessage({ f, names }: { f: FailedTurn; names: string[] }) {
         <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
         <span>
           {f.errorMessage}
+          {f.detail && (
+            <span className="mt-1 block text-xs text-destructive/80">Provider said: {f.detail}</span>
+          )}
           {f.requeued && (
             <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
               <RotateCw className="size-3" /> The messages will be answered once this is resolved.

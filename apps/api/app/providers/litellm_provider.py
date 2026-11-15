@@ -9,6 +9,7 @@ blocks to ContentBlocked.
 from __future__ import annotations
 
 import os
+import re
 
 # Must be set before litellm is imported: no network fetch of the model cost map
 # at import time, and no verbose logging (which could include request details).
@@ -38,6 +39,7 @@ from app.providers.errors import (
     AuthError,
     ContentBlocked,
     ContextTooLong,
+    ModelUnavailable,
     ProviderError,
     ProviderUnavailable,
     QuotaExceeded,
@@ -82,11 +84,27 @@ def _retry_after(e: Exception) -> float | None:
         return None
 
 
+_MESSAGE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def provider_message(raw: str) -> str | None:
+    """Pull the human-readable `message` out of a provider's JSON error body."""
+    m = _MESSAGE.search(raw)
+    if not m:
+        return None
+    return m.group(1).encode().decode("unicode_escape", errors="ignore")[:500]
+
+
 def map_exception(e: Exception, api_key: str) -> ProviderError:
     """Normalize a LiteLLM exception. Order matters: specific subclasses first."""
     msg = str(e)
     if isinstance(e, ProviderError):
         return e
+    # LiteLLM wraps some failures (e.g. a 503 on a streaming call) in a fallback
+    # error that carries the real cause.
+    inner = getattr(e, "original_exception", None)
+    if isinstance(inner, Exception) and inner is not e:
+        return map_exception(inner, api_key)
     if isinstance(e, lx.ContextWindowExceededError):
         return ContextTooLong("The conversation is too long for this model", secret=api_key)
     if isinstance(e, lx.ContentPolicyViolationError):
@@ -103,7 +121,8 @@ def map_exception(e: Exception, api_key: str) -> ProviderError:
     if isinstance(e, lx.PaymentRequiredError | lx.BudgetExceededError):
         return QuotaExceeded("The API key is out of quota or credit", secret=api_key)
     if isinstance(e, lx.NotFoundError):
-        return Unknown("The selected model wasn't found for this key", secret=api_key)
+        detail = provider_message(msg) or "The selected model wasn't found for this key"
+        return ModelUnavailable(detail, secret=api_key)
     if isinstance(
         e,
         lx.APIConnectionError
@@ -114,7 +133,8 @@ def map_exception(e: Exception, api_key: str) -> ProviderError:
     ):
         return ProviderUnavailable("The provider is unavailable right now", secret=api_key)
     if isinstance(e, lx.BadRequestError):
-        return Unknown(f"The provider rejected the request: {msg[:300]}", secret=api_key)
+        detail = provider_message(msg) or msg[:300]
+        return Unknown(f"The provider rejected the request: {detail}", secret=api_key)
     return Unknown(f"Unexpected provider error ({type(e).__name__})", secret=api_key)
 
 

@@ -33,6 +33,8 @@ export type FailedTurn = {
   anchorSeq: number;
   errorCode: string;
   errorMessage: string;
+  /** provider's own explanation (redacted server-side), e.g. "model retired" */
+  detail: string | null;
   partialText: string | null;
   requeued: boolean;
 };
@@ -172,6 +174,7 @@ function applyPersisted(s: LiveState, ev: ServerEvent): LiveState {
             anchorSeq,
             errorCode: String(p.error_code ?? "unknown"),
             errorMessage: String(p.error_message ?? "Something went wrong."),
+            detail: (p.detail as string | null | undefined) ?? null,
             partialText: (p.partial_text as string | null) ?? null,
             requeued,
           },

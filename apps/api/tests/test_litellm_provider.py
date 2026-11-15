@@ -193,3 +193,35 @@ def test_token_count_and_context_window() -> None:
     assert p.count_tokens("gemini/gemini-2.5-flash", [Msg("user", "hello world")], "sys") > 0
     assert lp.context_window("gemini", "gemini-2.5-flash") >= 32_000
     assert lp.context_window("gemini", "no-such-model-xyz") == lp.DEFAULT_CONTEXT_WINDOW
+
+
+async def test_model_not_found_surfaces_provider_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.providers.errors import ModelUnavailable
+
+    body = (
+        'GeminiException - {"error": {"code": 404, "message": "This model models/old-x is no '
+        'longer available to new users. Please use models/new-y.", "status": "NOT_FOUND"}} key='
+        + KEY
+    )
+    e = _exc(lx.NotFoundError, body)
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion([], [], raise_at=-1, exc=e))
+    with pytest.raises(ModelUnavailable) as ei:
+        await collect(lp.LiteLLMProvider())
+    assert ei.value.code == "model"
+    assert "no longer available to new users" in ei.value.message
+    assert "models/new-y" in ei.value.message
+    assert KEY not in ei.value.message
+
+
+def test_provider_message_extraction() -> None:
+    assert lp.provider_message('{"message": "a \\"quoted\\" thing"}') == 'a "quoted" thing'
+    assert lp.provider_message("no json here") is None
+
+
+async def test_midstream_fallback_unwraps_original(monkeypatch: pytest.MonkeyPatch) -> None:
+    inner = _exc(lx.ServiceUnavailableError, '{"error": {"code": 503, "message": "high demand"}}')
+    outer = RuntimeError("MidStreamFallbackError: wrapped")
+    outer.original_exception = inner  # type: ignore[attr-defined]
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion([], [], raise_at=-1, exc=outer))
+    with pytest.raises(ProviderUnavailable):
+        await collect(lp.LiteLLMProvider())

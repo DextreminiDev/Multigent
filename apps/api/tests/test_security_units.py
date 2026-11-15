@@ -159,14 +159,22 @@ async def test_gemini_ok_lists_chat_models_and_sends_key_in_header() -> None:
                         "displayName": "Gemini X",
                     },
                     {"name": "models/embed", "supportedGenerationMethods": ["embedContent"]},
+                    {
+                        "name": "models/gemini-x-tts",
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
+                    {
+                        "name": "models/gemini-flash-latest",
+                        "supportedGenerationMethods": ["generateContent"],
+                    },
                 ]
             },
         )
 
     v = _validator(httpx.MockTransport(handle))
     models = await v.list_models("gemini", SECRET)
-    assert [m.id for m in models] == ["gemini-x"]
-    assert models[0].context_window == 1_000_000
+    assert [m.id for m in models] == ["gemini-flash-latest", "gemini-x"]  # alias first, no tts
+    assert models[1].context_window == 1_000_000
     assert (await v.validate_key("gemini", SECRET)).ok
     assert SECRET not in str(seen[0].url)  # header, not ?key=
     assert seen[0].headers["x-goog-api-key"] == SECRET

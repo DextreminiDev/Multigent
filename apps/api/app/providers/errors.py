@@ -59,3 +59,9 @@ class KeyUnavailable(ProviderError):
     """The stored key couldn't be decrypted (or the vault isn't configured)."""
 
     code = "key"
+
+
+class ModelUnavailable(ProviderError):
+    """The model id doesn't exist or isn't available to this key (retired, gated...)."""
+
+    code = "model"

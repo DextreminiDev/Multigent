@@ -50,6 +50,11 @@ _OPENAI_NON_CHAT = ("embedding", "whisper", "tts", "dall-e", "moderation", "davi
                     "audio", "realtime", "transcribe", "image", "search")  # fmt: skip
 
 
+# Gemini models that list generateContent but aren't text chat models.
+_GEMINI_NON_CHAT = ("tts", "image", "lyria", "banana", "research", "customtools", "embedding",
+                    "aqa", "robotics", "computer-use", "veo", "imagen", "audio", "live")  # fmt: skip
+
+
 class KeyValidator(Protocol):
     async def list_models(
         self, provider: str, api_key: str, base_url: str | None = None
@@ -111,7 +116,7 @@ class HttpKeyValidator:
                 {"x-goog-api-key": api_key},
                 {"pageSize": 1000},
             )
-            return [
+            models = [
                 ModelInfo(
                     id=m["name"].removeprefix("models/"),
                     context_window=m.get("inputTokenLimit"),
@@ -119,7 +124,10 @@ class HttpKeyValidator:
                 )
                 for m in data.get("models", [])
                 if "generateContent" in m.get("supportedGenerationMethods", [])
+                and not any(t in m["name"] for t in _GEMINI_NON_CHAT)
             ]
+            # "-latest" aliases first: they always point at a model the key can use
+            return sorted(models, key=lambda m: (not m.id.endswith("-latest"),))
         if provider == "anthropic":
             data = await self._get(
                 "https://api.anthropic.com/v1/models",

@@ -57,6 +57,8 @@ FRIENDLY: dict[str, str] = {
     "unavailable": "The model provider is unavailable right now. Try again shortly.",
     "blocked": "The provider's safety filter blocked this response.",
     "key": "The stored API key can't be read. The owner needs to re-enter it.",
+    "model": "The selected model isn't available for this API key. "
+    "The owner should pick a different model in chat settings.",
     "unknown": "Something went wrong talking to the model.",
 }
 
@@ -552,6 +554,8 @@ class TurnRunner:
                     "turn_id": str(claim.turn_id),
                     "error_code": code,
                     "error_message": FRIENDLY.get(code, FRIENDLY["unknown"]),
+                    # provider's own explanation, already redacted (useful to the owner)
+                    "detail": err.message[:500] if code in ("model", "unknown") else None,
                     "message_ids": [str(i) for i in ids],
                     "requeued": requeue,
                     "partial_text": result.text or None,
