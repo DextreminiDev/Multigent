@@ -34,7 +34,7 @@ def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
         processors=[*shared, renderer],
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(level)),
         logger_factory=structlog.PrintLoggerFactory(sys.stdout),
-        cache_logger_on_first_use=True,
+        cache_logger_on_first_use=False,  # allow reconfiguration (tests)
     )
 
     handler = logging.StreamHandler(sys.stdout)

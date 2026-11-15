@@ -4,8 +4,9 @@ x-api-env: &api-env
   ENV: development
   DATABASE_URL: postgresql+asyncpg://multigent:multigent@postgres:5432/multigent
   REDIS_URL: redis://redis:6379/0
-  KEY_ENCRYPTION_KEYS: ${KEY_ENCRYPTION_KEYS:-{}}
-  KEY_ENCRYPTION_ACTIVE_ID: ${KEY_ENCRYPTION_ACTIVE_ID:-}
+  # Dev-only default master key (public!). The API refuses to start with it in production.
+  KEY_ENCRYPTION_KEYS: ${KEY_ENCRYPTION_KEYS:-{"dev":"ZGV2LW9ubHkta2V5LWRvLW5vdC11c2UtaW4tcHJvZCE="}}
+  KEY_ENCRYPTION_ACTIVE_ID: ${KEY_ENCRYPTION_ACTIVE_ID:-dev}
   SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-please}
   ALLOWED_ORIGINS: http://localhost:3000
   DEV_LOGIN: ${DEV_LOGIN:-1}

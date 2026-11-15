@@ -6,7 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.32",
-  "pydantic>=2.9",
+  "pydantic[email]>=2.9",
   "pydantic-settings>=2.6",
   "sqlalchemy[asyncio]>=2.0.36",
   "asyncpg>=0.30",
@@ -42,6 +42,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "PT011"]
 "app/db/alembic/versions/**" = ["E501"]
+"app/providers/catalog.py" = ["E501"]  # one-line provider table
 
 [tool.mypy]
 python_version = "3.12"

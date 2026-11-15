@@ -466,6 +466,8 @@ The UI shows a context meter and "Summary covers messages 1-120". Owner can trig
 
 - OAuth (Google, GitHub). On callback the API creates a **server-side session** in Redis (`sess:{sid}` → user id, created, last seen); cookie `sid` is `HttpOnly; Secure; SameSite=Lax; Path=/`. Chosen over JWT so sessions can be revoked instantly (logout everywhere, account deletion, member removal).
 - CSRF: REST state-changing routes require `X-CSRF-Token` (double-submit, token readable from `GET /me`), plus `Origin` check. WebSocket frames aren't cookie-ambient across origins thanks to the `Origin` allowlist.
+- Implementation details: Redis stores only `sha256(sid)` (a Redis dump can't be replayed as cookies), with a per-user index for "log out everywhere". The CSRF token is `HMAC(SESSION_SECRET, sid)`, so it needs no storage. The cookie is `Secure` in production (configurable via `COOKIE_SECURE`).
+- Dev login is `POST /auth/dev/login {email, name}`; OAuth providers create sessions through the same `SessionStore`.
 - `DEV_LOGIN=1` enables a passwordless login route for local/tests only; the app refuses to start with it enabled when `ENV=production`.
 
 ### 11.2 Authorization
@@ -488,12 +490,21 @@ class KeyVault(Protocol):
   2. Worker decrypts immediately before the provider call, passes it as a function argument (never stored in an object attribute, never in `os.environ`), and discards it.
   3. No API ever returns it. Only `last4`, `status`, `validated_at`.
 - Deletion is a real `DELETE`; an in-flight turn for that chat is cancelled.
+- **Validation = listing models** (`GET .../models` on each provider; OpenRouter also checks `/key` because its model list is public). This consumes no tokens, which matters for free-tier Gemini keys, and the same call powers the owner's model picker (`GET /chats/{id}/models`). Keys travel in headers (`x-goog-api-key`, `x-api-key`, `Authorization`), never in query strings. Outcome: rejected (401/403/Gemini `API_KEY_INVALID`) → `422 key_invalid`, nothing stored; provider unreachable/5xx → stored as `unvalidated`; 429 → stored as `ok`.
+- The provider is chosen together with the key (`PUT /chats/{id}/key {provider, api_key, base_url?}`), since a ciphertext is bound to its provider by AAD. Switching provider clears `chats.model`. `PATCH /chats/{id}` covers title, instructions, model, output length and cap.
+- **SSRF guard:** an `openai_compatible` `base_url` must be `https`, carry no credentials/query, and resolve only to public addresses (no loopback, private, link-local or metadata IPs). `ALLOW_PRIVATE_BASE_URLS=1` relaxes this for self-hosted local models in dev.
+- FastAPI's default 422 echoes request input; a custom handler rebuilds validation errors without `input`, so a malformed key is never reflected back.
+- If no master key is configured the API still runs, but key routes return `503 vault_unconfigured`. docker-compose ships a public dev-only master key; settings refuse it when `ENV=production`.
 
 ### 11.4 Secret hygiene
 
 - `structlog` processor `redact_secrets` strips key-shaped patterns (`AIza…`, `sk-…`, `sk-ant-…`, `or-…`) and any literal key value registered for the current turn.
 - Provider exceptions are wrapped and scrubbed (§9.2). Sentry `before_send` applies the same scrubber.
 - An automated test (`test_key_never_leaks`) runs a full flow (save key → collaborators chat → provider error that echoes the key → fetch every endpoint and WS frame) and asserts the key string occurs **nowhere** in responses, events, captured logs or DB columns other than `ciphertext`.
+
+### 11.4b Visibility of owner settings
+
+`custom_instructions`, `daily_token_cap`, `base_url` and the key's `last4` are returned only to the owner (`VIEW_PRIVATE_SETTINGS`). Collaborators see provider, model, and key status (so the UI can say "the owner's key needs attention"). `chat.updated` events carry only public fields plus the names of changed fields.
 
 ### 11.5 Other controls
 
@@ -575,6 +586,8 @@ Additional layers:
 5. **Scheduling uses a Redis sorted set (`chat:due`)** with `ZADD NX` rather than a queue library. This gives debounce and batching for free, plus a trivial sweeper rebuild from Postgres.
 6. **Fencing token on turns** added beyond the plain lock, so a paused/zombie worker can't write after losing the lock.
 7. **Server-side sessions** rather than JWT, for instant revocation.
+8. **Custom instructions are owner-only** in API responses (the preamble already tells the model not to reveal them).
+9. **Key validation lists models** instead of a completion call, so validation costs no tokens.
 
 ---
 

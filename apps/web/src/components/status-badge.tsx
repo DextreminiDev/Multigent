@@ -17,11 +17,11 @@ export function StatusBadge() {
   }, []);
 
   if (state.kind === "loading") {
-    return <span className="text-muted">Checking backend…</span>;
+    return <span className="text-muted-foreground">Checking backend…</span>;
   }
   const ok = state.value?.status === "ok";
   return (
-    <span role="status" className={ok ? "text-ok" : "text-bad"}>
+    <span role="status" className={ok ? "text-ok" : "text-destructive"}>
       {ok ? "Backend ready" : "Backend unavailable"}
     </span>
   );

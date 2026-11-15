@@ -21,6 +21,7 @@ from redis.asyncio import Redis
 from app.config import Settings, get_settings
 from app.ids import uuid7
 from app.logging import configure_logging, get_logger
+from app.redis_client import make_redis
 
 HEARTBEAT_KEY = "worker:{worker_id}:tick"
 HEARTBEAT_INDEX = "workers:alive"
@@ -73,7 +74,7 @@ class Worker:
 async def _main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, json=settings.env != "development")
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis = make_redis(settings.redis_url)
     worker = Worker(settings, redis)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -87,7 +88,7 @@ async def _main() -> None:
 
 async def _check() -> int:
     """Healthcheck: exit 0 if any worker heartbeat is fresh."""
-    redis = Redis.from_url(get_settings().redis_url, decode_responses=True)
+    redis = make_redis(get_settings().redis_url)
     try:
         fresh = await redis.zcount(HEARTBEAT_INDEX, time.time() - HEARTBEAT_TTL_S, "+inf")
         return 0 if fresh > 0 else 1

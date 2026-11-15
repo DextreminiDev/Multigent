@@ -10,6 +10,9 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+# Public dev-only master key used by docker-compose defaults. Never valid in production.
+DEV_MASTER_KEY = b"dev-only-key-do-not-use-in-prod!"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -27,6 +30,13 @@ class Settings(BaseSettings):
     # Comma-separated in env (NoDecode stops pydantic-settings JSON-parsing it first).
     allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
     cookie_domain: str | None = None
+    # None = Secure only in production. Plain-http test clients can't send Secure cookies.
+    cookie_secure: bool | None = None
+    session_ttl_s: int = 60 * 60 * 24 * 30  # sliding
+
+    # Providers allowed when saving a key. "fake" (FakeProvider demo mode) is never
+    # allowed in production. "openai_compatible" requires a public https base_url.
+    allow_private_base_urls: bool = False  # SSRF guard for openai_compatible
 
     debounce_ms: int = 800
     worker_max_concurrent_turns: int = 20
@@ -49,9 +59,16 @@ class Settings(BaseSettings):
                 raise ValueError("DEV_LOGIN must not be enabled when ENV=production")
             if len(self.session_secret) < 32:
                 raise ValueError("SESSION_SECRET must be at least 32 chars in production")
-            if not self.encryption_keys():
+            keys = self.encryption_keys()
+            if not keys:
                 raise ValueError("KEY_ENCRYPTION_KEYS must be set in production")
+            if DEV_MASTER_KEY in keys.values():
+                raise ValueError("KEY_ENCRYPTION_KEYS contains the public dev key")
         return self
+
+    @property
+    def secure_cookies(self) -> bool:
+        return self.env == "production" if self.cookie_secure is None else self.cookie_secure
 
     def encryption_keys(self) -> dict[str, bytes]:
         """Decode master keys. Each must be exactly 32 bytes (AES-256)."""

@@ -58,6 +58,17 @@ def test_production_requires_encryption_keys() -> None:
         Settings(env="production", session_secret="s" * 40)
 
 
+def test_production_rejects_public_dev_key() -> None:
+    dev = base64.b64encode(b"dev-only-key-do-not-use-in-prod!").decode()
+    with pytest.raises(ValueError, match="public dev key"):
+        Settings(
+            env="production",
+            session_secret="s" * 40,
+            key_encryption_keys=json.dumps({"dev": dev}),
+            key_encryption_active_id="dev",
+        )
+
+
 def test_encryption_keys_must_be_32_bytes() -> None:
     s = Settings(
         key_encryption_keys=json.dumps({"k1": base64.b64encode(b"short").decode()}),

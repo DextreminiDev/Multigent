@@ -2,7 +2,7 @@
 
 Real-time shared AI chats. A chat's **owner** plugs in their own LLM API key (Gemini, Anthropic, OpenAI, OpenRouter); invited **collaborators** prompt the same model in the same live conversation, and everyone watches the AI's answers stream.
 
-> Status: milestone 1 (scaffold) of 7. Full README (architecture diagram, concurrency model, key security model, demo) lands in milestone 7. The design lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Status: milestone 2 (auth, chats, key vault) of 7. Full README (architecture diagram, concurrency model, key security model, demo) lands in milestone 7. The design lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Local setup
 
@@ -13,7 +13,7 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-- Web: http://localhost:3000
+- Web: http://localhost:3000 (dev sign-in: any name + email; pick "Demo (no key)" as the provider to try it without a real key)
 - API: http://localhost:8000 (`/healthz`, `/readyz`, `/docs`)
 
 ### Develop without containers for api/web
@@ -31,6 +31,8 @@ pnpm install && pnpm dev:web
 cd apps/api && uv run ruff check . && uv run mypy app tests && uv run pytest
 pnpm lint && pnpm typecheck && pnpm test
 ```
+
+After changing API routes or schemas, regenerate the typed client with `pnpm --filter @multigent/web gen:api`.
 
 Backend tests use the compose Postgres (`multigent_test` database) and Redis (db 15).
 

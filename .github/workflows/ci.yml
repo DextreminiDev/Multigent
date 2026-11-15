@@ -49,6 +49,8 @@ jobs:
         run: uv run mypy app tests
       - name: Tests
         run: uv run pytest -q
+      - name: OpenAPI schema is committed and current
+        run: uv run python -m app.openapi_export > /tmp/openapi.json && diff -u ../web/openapi.json /tmp/openapi.json
 
   frontend:
     runs-on: ubuntu-latest
