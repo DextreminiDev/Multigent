@@ -214,6 +214,10 @@ class Turn(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     trigger: Mapped[str] = mapped_column(Text, nullable=False, server_default="batch")
     lock_token: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # seq of this turn's `turn.started` event: the logical position of the turn. The
+    # AI reply is inserted at completion (higher seq), but belongs right after its
+    # batch; messages that arrived mid-turn come after it (prompt + UI ordering).
+    started_seq: Mapped[int | None] = mapped_column(BigInteger)
     provider: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[dt.datetime] = _ts()

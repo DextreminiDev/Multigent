@@ -18,7 +18,10 @@ from app.db.session import make_engine, make_sessionmaker
 from app.errors import install_error_handlers
 from app.health import router as health_router
 from app.logging import configure_logging, get_logger
+from app.messages.routes import router as messages_router
 from app.providers.catalog import HttpKeyValidator, KeyValidator
+from app.realtime.gateway import router as ws_router
+from app.realtime.hub import Hub
 from app.redis_client import make_redis
 from app.security.keyvault import KeyVault, LocalKeyVault
 
@@ -58,9 +61,13 @@ def create_app(
         else:  # dev/test only (production requires it, see Settings)
             log.warning("session_secret.ephemeral", hint="set SESSION_SECRET")
             app.state.session_secret = secrets.token_urlsafe(32)
+        hub = Hub(redis)
+        await hub.start()
+        app.state.hub = hub
         try:
             yield
         finally:
+            await hub.stop()
             if owned_validator is not None:
                 await owned_validator.aclose()
             await redis.aclose()
@@ -84,6 +91,8 @@ def create_app(
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(chats_router)
+    app.include_router(messages_router)
+    app.include_router(ws_router)
     return app
 
 

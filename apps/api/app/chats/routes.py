@@ -27,11 +27,13 @@ from app.deps import AuthDep, CsrfAuthDep, DbDep, RedisDep, SettingsDep
 from app.errors import ApiError
 from app.events import Outbox
 from app.ids import uuid7
+from app.messages.service import payloads_with_anchors
 from app.providers.catalog import PROVIDERS, KeyValidator
 from app.providers.errors import ProviderError
 from app.security.keyvault import EncryptedKey, KeyVault, KeyVaultError
 from app.security.redaction import registered_secret
 from app.security.urls import UnsafeUrlError, assert_public_url
+from app.turns.schedule import wake
 
 router = APIRouter(tags=["chats"])
 
@@ -138,6 +140,8 @@ async def patch_chat(
         await db.commit()
         await outbox.publish(redis)
         await db.refresh(m.chat)
+        if {"model", "daily_token_cap"} & set(changed):
+            await wake(redis, chat_id)  # queued messages may now be runnable
     return await build_chat_view(db, m)
 
 
@@ -169,20 +173,8 @@ async def list_messages(
     if before_seq is not None:
         stmt = stmt.where(Message.seq < before_seq)
     msgs = (await db.scalars(stmt.order_by(Message.seq.desc()).limit(limit))).all()
-    return [
-        MessageView(
-            id=x.id,
-            seq=x.seq,
-            kind=x.kind,
-            author_id=x.author_id,
-            author_name=x.author_name_snapshot,
-            content="" if x.status == "deleted" else x.content,
-            status=x.status,
-            turn_id=x.turn_id,
-            created_at=x.created_at,
-        )
-        for x in reversed(msgs)
-    ]
+    payloads = await payloads_with_anchors(db, list(reversed(msgs)))
+    return [MessageView.model_validate(p) for p in payloads]
 
 
 # --------------------------------------------------------------------- key slot
@@ -265,6 +257,7 @@ async def put_key(
         )
         await db.commit()
         await outbox.publish(redis)
+        await wake(redis, chat_id)  # resume a chat paused on its key
         view = key_view(key, owner=True)
         assert view is not None
         return view
@@ -332,6 +325,8 @@ async def validate_key(
     )
     await db.commit()
     await outbox.publish(redis)
+    if check.ok:
+        await wake(redis, chat_id)
     view = key_view(key, owner=True)
     assert view is not None
     return view

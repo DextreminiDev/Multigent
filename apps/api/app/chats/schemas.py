@@ -90,13 +90,16 @@ class KeyIn(BaseModel):
 class MessageView(BaseModel):
     id: uuid.UUID
     seq: int
+    anchor_seq: int
     kind: Literal["human", "ai", "system_event"]
     author_id: uuid.UUID | None
     author_name: str | None
+    author_color: str | None = None
     content: str
     status: str
     turn_id: uuid.UUID | None
     created_at: dt.datetime
+    client_msg_id: uuid.UUID | None = None
 
 
 class ModelList(BaseModel):

@@ -54,6 +54,19 @@ class Outbox:
     ) -> int:
         """Persist an event (replayable) and queue it for publishing."""
         seq = await allocate_seq(db, chat_id)
+        self.record(db, chat_id, seq, type_, payload)
+        return seq
+
+    def record(
+        self,
+        db: AsyncSession,
+        chat_id: uuid.UUID,
+        seq: int,
+        type_: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Persist an event for a seq already allocated with `allocate_seq` in this
+        transaction (when the payload needs the seq, e.g. a message row)."""
         db.add(ChatEvent(chat_id=chat_id, seq=seq, type=type_, payload=payload))
         self.events.append(
             {
@@ -64,7 +77,6 @@ class Outbox:
                 "ts": dt.datetime.now(dt.UTC).isoformat(),
             }
         )
-        return seq
 
     def push_ephemeral(self, chat_id: uuid.UUID, type_: str, payload: dict[str, Any]) -> None:
         """Queue a non-persisted event (no seq), e.g. chat.deleted."""

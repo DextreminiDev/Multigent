@@ -13,6 +13,8 @@ Scriptable behaviors:
 from __future__ import annotations
 
 import asyncio
+import html
+import re
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 
@@ -28,6 +30,8 @@ from app.providers.base import (
     estimate_tokens,
 )
 from app.providers.errors import AuthError, ContentBlocked, ProviderError, RateLimitError
+
+_TAG = re.compile(r'<message from="([^"]*)"[^>]*>\n(.*?)\n</message>', re.S)
 
 
 @dataclass
@@ -57,8 +61,20 @@ class FakeProvider:
 
     @staticmethod
     def echo_reply(req: ProviderRequest) -> list[str]:
+        """Deterministic demo reply. If the last user turn carries speaker tags, answer
+        each person in their own section (shows batching without a real model)."""
         last = req.messages[-1].content if req.messages else ""
-        words = f"[fake:{req.model}] You said: {last}".split(" ")
+        tagged = _TAG.findall(last)
+        if tagged:
+            parts = [f"*Demo model ({req.model}): I echo instead of thinking.*\n"]
+            for name, body in tagged:
+                text = html.unescape(body).strip()
+                quoted = "\n".join(f"> {line}" for line in text.splitlines() or [""])
+                parts.append(f"**{html.unescape(name)}**, you said:\n\n{quoted}\n")
+            reply = "\n".join(parts)
+        else:
+            reply = f"[fake:{req.model}] You said: {last}"
+        words = reply.split(" ")
         return [w + (" " if i < len(words) - 1 else "") for i, w in enumerate(words)]
 
     async def stream_chat(self, req: ProviderRequest, api_key: str) -> AsyncIterator[Chunk]:

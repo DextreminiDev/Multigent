@@ -53,3 +53,9 @@ class ContentBlocked(ProviderError):
 
 class Unknown(ProviderError):
     code = "unknown"
+
+
+class KeyUnavailable(ProviderError):
+    """The stored key couldn't be decrypted (or the vault isn't configured)."""
+
+    code = "key"

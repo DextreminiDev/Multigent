@@ -127,7 +127,8 @@ export interface paths {
         /** List Messages */
         get: operations["list_messages_chats__chat_id__messages_get"];
         put?: never;
-        post?: never;
+        /** Post Message */
+        post: operations["post_message_chats__chat_id__messages_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -143,6 +144,27 @@ export interface paths {
         };
         /** List Models */
         get: operations["list_models_chats__chat_id__models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chats/{chat_id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Chat State
+         * @description One consistent snapshot (REPEATABLE READ): `last_seq` plus everything
+         *     up to it. Clients then `subscribe {after_seq: last_seq}` with no gap.
+         */
+        get: operations["chat_state_chats__chat_id__state_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -240,6 +262,16 @@ export interface components {
             model?: string | null;
             /** Title */
             title?: string | null;
+        };
+        /** ChatState */
+        ChatState: {
+            /** Has More */
+            has_more: boolean;
+            /** Last Seq */
+            last_seq: number;
+            /** Messages */
+            messages: components["schemas"]["MessageView"][];
+            running_turn: components["schemas"]["RunningTurn"] | null;
         };
         /** ChatView */
         ChatView: {
@@ -343,10 +375,16 @@ export interface components {
         };
         /** MessageView */
         MessageView: {
+            /** Anchor Seq */
+            anchor_seq: number;
+            /** Author Color */
+            author_color?: string | null;
             /** Author Id */
             author_id: string | null;
             /** Author Name */
             author_name: string | null;
+            /** Client Msg Id */
+            client_msg_id?: string | null;
             /** Content */
             content: string;
             /**
@@ -404,6 +442,41 @@ export interface components {
             redis: boolean;
             /** Status */
             status: string;
+        };
+        /** RunningTurn */
+        RunningTurn: {
+            /** Author Ids */
+            author_ids: string[];
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Message Ids */
+            message_ids: string[];
+            /** Started Seq */
+            started_seq: number | null;
+            /**
+             * Trigger
+             * @enum {string}
+             */
+            trigger: "batch" | "retry" | "regenerate";
+        };
+        /** SendIn */
+        SendIn: {
+            /**
+             * Client Msg Id
+             * Format: uuid
+             */
+            client_msg_id: string;
+            /** Content */
+            content: string;
+        };
+        /** SendOut */
+        SendOut: {
+            /** Created */
+            created: boolean;
+            message: components["schemas"]["MessageView"];
         };
         /** UserRef */
         UserRef: {
@@ -781,6 +854,41 @@ export interface operations {
             };
         };
     };
+    post_message_chats__chat_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_models_chats__chat_id__models_get: {
         parameters: {
             query?: never;
@@ -799,6 +907,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_state_chats__chat_id__state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatState"];
                 };
             };
             /** @description Validation Error */

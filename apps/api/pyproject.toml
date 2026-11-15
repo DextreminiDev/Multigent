@@ -15,6 +15,7 @@ dependencies = [
   "cryptography>=43",
   "structlog>=24.4",
   "httpx>=0.28",
+  "litellm==1.106.6",
 ]
 
 [dependency-groups]
@@ -40,7 +41,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S", "PT011"]
+"tests/**" = ["S", "PT011", "PT018", "ASYNC109"]
 "app/db/alembic/versions/**" = ["E501"]
 "app/providers/catalog.py" = ["E501"]  # one-line provider table
 

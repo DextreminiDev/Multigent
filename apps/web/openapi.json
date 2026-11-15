@@ -88,6 +88,43 @@
         "title": "ChatPatch",
         "type": "object"
       },
+      "ChatState": {
+        "properties": {
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "last_seq": {
+            "title": "Last Seq",
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/MessageView"
+            },
+            "title": "Messages",
+            "type": "array"
+          },
+          "running_turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunningTurn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "last_seq",
+          "messages",
+          "has_more",
+          "running_turn"
+        ],
+        "title": "ChatState",
+        "type": "object"
+      },
       "ChatView": {
         "properties": {
           "base_url": {
@@ -373,6 +410,21 @@
       },
       "MessageView": {
         "properties": {
+          "anchor_seq": {
+            "title": "Anchor Seq",
+            "type": "integer"
+          },
+          "author_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author Color"
+          },
           "author_id": {
             "anyOf": [
               {
@@ -395,6 +447,18 @@
               }
             ],
             "title": "Author Name"
+          },
+          "client_msg_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Msg Id"
           },
           "content": {
             "title": "Content",
@@ -443,6 +507,7 @@
         "required": [
           "id",
           "seq",
+          "anchor_seq",
           "kind",
           "author_id",
           "author_name",
@@ -561,6 +626,98 @@
           "redis"
         ],
         "title": "Readiness",
+        "type": "object"
+      },
+      "RunningTurn": {
+        "properties": {
+          "author_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Author Ids",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "message_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Message Ids",
+            "type": "array"
+          },
+          "started_seq": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started Seq"
+          },
+          "trigger": {
+            "enum": [
+              "batch",
+              "retry",
+              "regenerate"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "trigger",
+          "started_seq",
+          "message_ids",
+          "author_ids"
+        ],
+        "title": "RunningTurn",
+        "type": "object"
+      },
+      "SendIn": {
+        "properties": {
+          "client_msg_id": {
+            "format": "uuid",
+            "title": "Client Msg Id",
+            "type": "string"
+          },
+          "content": {
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "client_msg_id",
+          "content"
+        ],
+        "title": "SendIn",
+        "type": "object"
+      },
+      "SendOut": {
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "boolean"
+          },
+          "message": {
+            "$ref": "#/components/schemas/MessageView"
+          }
+        },
+        "required": [
+          "message",
+          "created"
+        ],
+        "title": "SendOut",
         "type": "object"
       },
       "UserRef": {
@@ -1117,6 +1274,57 @@
         "tags": [
           "chats"
         ]
+      },
+      "post": {
+        "operationId": "post_message_chats__chat_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Message",
+        "tags": [
+          "messages"
+        ]
       }
     },
     "/chats/{chat_id}/models": {
@@ -1159,6 +1367,50 @@
         "summary": "List Models",
         "tags": [
           "chats"
+        ]
+      }
+    },
+    "/chats/{chat_id}/state": {
+      "get": {
+        "description": "One consistent snapshot (REPEATABLE READ): `last_seq` plus everything\nup to it. Clients then `subscribe {after_seq: last_seq}` with no gap.",
+        "operationId": "chat_state_chats__chat_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatState"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat State",
+        "tags": [
+          "messages"
         ]
       }
     },

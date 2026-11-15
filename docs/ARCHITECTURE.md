@@ -165,6 +165,7 @@ turns(
   provider, model, started_at, finished_at,
   tokens_in int, tokens_out int, error_code text, error_detail text,  -- error_detail is redacted
   partial_text text NULL,                       -- kept on failure for display
+  started_seq bigint NULL,                      -- seq of this turn's turn.started event (§6.7)
   ai_message_id NULL
 )
 CREATE UNIQUE INDEX one_running_turn_per_chat ON turns(chat_id) WHERE status = 'running';   -- I3 safety net
@@ -293,9 +294,17 @@ Outcome rules (what happens to the batch's messages):
 **Retry** creates a new turn (`trigger='retry'`) over the same batch plus any newer pending messages.
 **Regenerate** (owner only) marks the last AI message `superseded` (hidden by default, emits `message.superseded`) and creates a turn (`trigger='regenerate'`) over the same batch.
 
+### 6.4b Logical order of AI replies
+
+The AI message is inserted at completion, so its `seq` is *higher* than any message sent while it streamed, even though it answers an earlier batch. Each turn therefore records `started_seq` (the seq of its `turn.started` event):
+
+- **Prompt:** a human message sits at the `started_seq` of the turn that consumed it, and an AI reply sits right after its own turn's `started_seq`. The model sees `batch₁ → reply₁ → batch₂` even if a batch-2 message has a lower seq than reply₁.
+- **UI:** messages carry `anchor_seq` (its own seq for humans, the turn's `started_seq` for AI replies) and render in `anchor_seq` order. A reply appears right under the batch it answers; messages sent mid-turn appear below it with a "queued" badge.
+
 ### 6.5 Scheduler and sweeper
 
 - **Scheduler loop** (every worker, ~200 ms): `ZRANGEBYSCORE chat:due -inf now LIMIT 0 N` → claim as in §6.3. Concurrency bounded by a semaphore (`WORKER_MAX_CONCURRENT_TURNS`, default 20).
+- **Lazy orphan recovery** (milestone 3): a worker that acquires the chat lock and finds a turn still `running` knows its owner lost the lock. It fails that turn (`crash`) and returns the batch to pending inside the same claim transaction, so a new message always unsticks a chat. The periodic sweeper (milestone 5) does this proactively.
 - **Sweeper** (every 5 s, guarded by a Redis leader lock so only one runs):
   1. `chats` with pending human messages, no live lock key, no `running` turn → `ZADD chat:due`.
   2. `turns` with `status='running'` and no live lock key (TTL expired) → mark `failed(crash)`, return batch messages to `pending`, emit events, re-schedule.
@@ -367,6 +376,8 @@ Client → server
 | `turn.cancel` | `{chat_id, turn_id}` |
 | `typing` | `{chat_id}` (throttled client-side to 1 / 2 s) |
 
+REST companions: `GET /chats/{id}/state` returns one REPEATABLE READ snapshot (`last_seq`, the latest 50 messages, any running turn incl. `started_seq`), so the client subscribes with `after_seq = last_seq` and no gap is possible. `POST /chats/{id}/messages` is the same send path as `message.send`, for non-WS clients and tests.
+
 Server → client
 
 | type | persisted | notes |
@@ -394,7 +405,7 @@ Every client frame carries a `ref`; the server replies `ack` or `error` with tha
 
 - Redis channel per chat: `chat:{id}:events`. An API instance subscribes lazily when its first local socket joins and unsubscribes when the last leaves.
 - Control channel per user: `user:{id}:control`, used to deliver `kicked` and to force-close sockets on role or membership change (I5).
-- Each connection has a bounded outbound queue. `turn.delta` frames are **coalesced** (time-based, ~40 ms windows). If the queue overflows, the server closes the socket; the client resumes via §8.3. Slow consumers never stall others.
+- Each connection has a bounded outbound queue. `turn.delta` frames are **coalesced at the source**: the worker buffers provider chunks and flushes one frame every ~40 ms, so the Redis stream buffer, pub/sub and every socket all carry the same coalesced frames (one `idx` space). If the queue overflows, the server closes the socket; the client resumes via §8.3. Slow consumers never stall others.
 
 ### 8.5 Presence and typing
 
@@ -527,7 +538,7 @@ class KeyVault(Protocol):
 
 ## 13. Frontend architecture
 
-- **State:** one Zustand store per open chat holds `messages` (by `seq`), `turn` (running turn + streamed text), `members/presence`, `typing`, `connection status`. All server events go through a single **pure reducer** (`applyEvent(state, event)`), so reconnect/resume logic is testable without a browser.
+- **State:** one hook per open chat (`useLiveChat`, plain React state + a ref; no global store needed) holds `messages` (by `seq`), `turn` (running turn + streamed text), `members/presence`, `typing`, `connection status`. All server events go through a single **pure reducer** (`applyEvent(state, event)`), so reconnect/resume logic is testable without a browser.
 - **WS client:** singleton, multiplexes chats, handles reconnect with backoff + jitter, resume (`after_seq`), per-frame `ref` acks, outbox for unsent messages (keyed by `client_msg_id`, replayed after reconnect; this is what makes retries idempotent end-to-end).
 - **Optimistic send:** message appears instantly as `sending`, becomes `queued`/`delivered` when `message.created` with its `client_msg_id` arrives. If the server rejects (rate limit, perms), show inline error with retry.
 - **Streaming render:** text appended per delta, rendered through a memoized markdown component (finalize code highlighting at end of stream to keep it cheap). `aria-live="polite"` region announces completion, not every token.
@@ -588,6 +599,9 @@ Additional layers:
 7. **Server-side sessions** rather than JWT, for instant revocation.
 8. **Custom instructions are owner-only** in API responses (the preamble already tells the model not to reveal them).
 9. **Key validation lists models** instead of a completion call, so validation costs no tokens.
+10. **`turns.started_seq` + `anchor_seq`** (§6.4b): AI replies are ordered by their turn's start, not their insertion seq.
+11. **Delta coalescing happens in the worker**, not per connection (§8.4).
+12. **Demo mode:** the `fake` provider answers each person in the batch under their name (echoing their message), so batching and attribution are visible without any API key.
 
 ---
 

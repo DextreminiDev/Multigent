@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageSquareDashed, PanelRight, Users } from "lucide-react";
+import { PanelRight, Users } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -8,29 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, type Chat } from "@/lib/api/client";
-import { useChat } from "@/lib/api/hooks";
+import { useChat, useMe } from "@/lib/api/hooks";
 import { cn } from "@/lib/utils";
 import { SettingsPanel } from "./settings-panel";
-import { isChatReady, SetupChecklist } from "./setup-checklist";
-
-function EmptyConversation({ chat }: { chat: Chat }) {
-  const ready = isChatReady(chat);
-  return (
-    <div className="grid h-full place-items-center p-6 text-center">
-      <div className="max-w-sm space-y-2">
-        <MessageSquareDashed className="mx-auto size-8 text-muted-foreground" aria-hidden />
-        <p className="font-medium">No messages yet</p>
-        <p className="text-sm text-muted-foreground">
-          {ready
-            ? "Live messaging is the next milestone. The chat is configured and ready for it."
-            : chat.role === "owner"
-              ? "Finish setup to start chatting."
-              : "Waiting for the owner to finish setting up this chat."}
-        </p>
-      </div>
-    </div>
-  );
-}
+import { Conversation } from "./conversation";
 
 function PanelHeading({ chat }: { chat: Chat }) {
   return <>{chat.role === "owner" ? "Chat settings" : "About this chat"}</>;
@@ -38,6 +19,7 @@ function PanelHeading({ chat }: { chat: Chat }) {
 
 export function ChatScreen({ chatId }: { chatId: string }) {
   const chat = useChat(chatId);
+  const me = useMe();
   const [panelOpen, setPanelOpen] = useState(true); // desktop
   const [sheetOpen, setSheetOpen] = useState(false); // mobile
 
@@ -69,7 +51,6 @@ export function ChatScreen({ chatId }: { chatId: string }) {
   }
 
   const c = chat.data;
-  const needsSetup = c.role === "owner" && !isChatReady(c);
 
   return (
     <div className="flex h-full min-h-0">
@@ -108,14 +89,8 @@ export function ChatScreen({ chatId }: { chatId: string }) {
             <PanelRight />
           </Button>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto">
-          {needsSetup ? (
-            <div className="p-4 sm:p-8">
-              <SetupChecklist chat={c} />
-            </div>
-          ) : (
-            <EmptyConversation chat={c} />
-          )}
+        <main className="min-h-0 flex-1">
+          {me.data ? <Conversation chat={c} meId={me.data.user.id} /> : null}
         </main>
       </div>
 

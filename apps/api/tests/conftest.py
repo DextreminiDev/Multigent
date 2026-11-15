@@ -24,7 +24,10 @@ from app.db.session import make_engine, make_sessionmaker
 from app.main import create_app
 from app.providers.base import KeyCheck, ModelInfo
 from app.providers.errors import AuthError, ProviderError, ProviderUnavailable
+from app.providers.fake import FakeProvider
+from app.providers.registry import ProviderRegistry
 from app.redis_client import make_redis
+from app.turns.runner import TurnRunner
 
 API_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -212,3 +215,36 @@ async def login(app: FastAPI) -> AsyncIterator[LoginFn]:
     yield _login
     for c in opened:
         await c.aclose()
+
+
+# --------------------------------------------------------------------- turn engine
+
+
+@pytest.fixture
+def providers() -> ProviderRegistry:
+    return ProviderRegistry(fake=FakeProvider())
+
+
+@pytest.fixture
+def runner(app: FastAPI, providers: ProviderRegistry) -> TurnRunner:
+    return TurnRunner(
+        app.state.sessionmaker,
+        app.state.redis,
+        app.state.vault,
+        providers,
+        lock_ttl_ms=3000,
+        heartbeat_s=0.3,
+    )
+
+
+async def ready_chat(
+    owner: UserClient, validator: StubValidator, key: str = "demo-key-1234"
+) -> str:
+    """Create a chat with a working (fake) key and a model selected."""
+    validator.valid.add(key)
+    cid = (await owner.post("/chats", json={"title": "T"})).json()["id"]
+    r = await owner.put(f"/chats/{cid}/key", json={"provider": "fake", "api_key": key})
+    assert r.status_code == 200, r.text
+    r = await owner.patch(f"/chats/{cid}", json={"model": "fake-small"})
+    assert r.status_code == 200, r.text
+    return str(cid)
