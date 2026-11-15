@@ -1,0 +1,83 @@
+name: multigent
+
+x-api-env: &api-env
+  ENV: development
+  DATABASE_URL: postgresql+asyncpg://multigent:multigent@postgres:5432/multigent
+  REDIS_URL: redis://redis:6379/0
+  KEY_ENCRYPTION_KEYS: ${KEY_ENCRYPTION_KEYS:-{}}
+  KEY_ENCRYPTION_ACTIVE_ID: ${KEY_ENCRYPTION_ACTIVE_ID:-}
+  SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-please}
+  ALLOWED_ORIGINS: http://localhost:3000
+  DEV_LOGIN: ${DEV_LOGIN:-1}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: multigent
+      POSTGRES_PASSWORD: multigent
+      POSTGRES_DB: multigent
+    ports: ["${POSTGRES_HOST_PORT:-55432}:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U multigent -d multigent"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports: ["${REDIS_HOST_PORT:-56379}:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: { context: ./apps/api }
+    command: ["alembic", "upgrade", "head"]
+    environment: *api-env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: { context: ./apps/api }
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *api-env
+    ports: ["8000:8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build: { context: ./apps/api }
+    command: ["python", "-m", "app.worker"]
+    environment: *api-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker", "--check"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build: { context: ./apps/web }
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3000:3000"]
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  pgdata:

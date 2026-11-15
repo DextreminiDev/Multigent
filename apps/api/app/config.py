@@ -1,0 +1,74 @@
+"""Application settings (env-driven). See docs/ARCHITECTURE.md §15."""
+
+from __future__ import annotations
+
+import base64
+import json
+from functools import lru_cache
+from typing import Annotated, Literal
+
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    env: Literal["development", "test", "production"] = "development"
+
+    database_url: str = "postgresql+asyncpg://multigent:multigent@localhost:55432/multigent"
+    redis_url: str = "redis://localhost:56379/0"
+
+    # KeyVault master keys: JSON object {key_id: base64(32 bytes)}.
+    key_encryption_keys: str = Field(default="{}", repr=False)
+    key_encryption_active_id: str = ""
+
+    session_secret: str = Field(default="", repr=False)
+    # Comma-separated in env (NoDecode stops pydantic-settings JSON-parsing it first).
+    allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
+    cookie_domain: str | None = None
+
+    debounce_ms: int = 800
+    worker_max_concurrent_turns: int = 20
+    shutdown_grace_s: int = 30
+
+    dev_login: bool = False
+    log_level: str = "INFO"
+
+    @field_validator("allowed_origins", mode="before")
+    @classmethod
+    def _split_origins(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip().startswith("["):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    @model_validator(mode="after")
+    def _production_guards(self) -> Settings:
+        if self.env == "production":
+            if self.dev_login:
+                raise ValueError("DEV_LOGIN must not be enabled when ENV=production")
+            if len(self.session_secret) < 32:
+                raise ValueError("SESSION_SECRET must be at least 32 chars in production")
+            if not self.encryption_keys():
+                raise ValueError("KEY_ENCRYPTION_KEYS must be set in production")
+        return self
+
+    def encryption_keys(self) -> dict[str, bytes]:
+        """Decode master keys. Each must be exactly 32 bytes (AES-256)."""
+        raw = json.loads(self.key_encryption_keys or "{}")
+        if not isinstance(raw, dict):
+            raise ValueError("KEY_ENCRYPTION_KEYS must be a JSON object")
+        keys: dict[str, bytes] = {}
+        for key_id, b64 in raw.items():
+            material = base64.b64decode(b64)
+            if len(material) != 32:
+                raise ValueError(f"encryption key {key_id!r} must be 32 bytes")
+            keys[str(key_id)] = material
+        if keys and self.key_encryption_active_id not in keys:
+            raise ValueError("KEY_ENCRYPTION_ACTIVE_ID must name a key in KEY_ENCRYPTION_KEYS")
+        return keys
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
