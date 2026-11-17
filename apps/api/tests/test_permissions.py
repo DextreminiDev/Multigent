@@ -14,6 +14,7 @@ EXPECTED: dict[Action, tuple[bool, bool | str, bool]] = {
     A.SEND: (True, True, False),
     A.DELETE_OWN_PENDING: (True, True, False),
     A.CANCEL_TURN: (True, "batch", False),
+    A.RETRY_TURN: (True, "batch", False),
     A.REGENERATE: (True, False, False),
     A.MANAGE_CHAT: (True, False, False),
     A.MANAGE_MEMBERS: (True, False, False),

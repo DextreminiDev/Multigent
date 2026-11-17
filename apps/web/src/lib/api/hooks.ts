@@ -267,3 +267,52 @@ export function useAcceptInvite() {
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.chats, exact: true }),
   });
 }
+
+
+// ------------------------------------------------------------------ turn controls
+// Results arrive as live events (turn.cancelled, turn.retried, ...), so these
+// mutations don't touch the query cache.
+
+export function useCancelTurn(chatId: string) {
+  return useMutation({
+    mutationFn: (turnId: string) =>
+      unwrap(
+        api.POST("/chats/{chat_id}/turns/{turn_id}/cancel", {
+          params: { path: { chat_id: chatId, turn_id: turnId } },
+        }),
+      ),
+  });
+}
+
+export function useRetryTurn(chatId: string) {
+  return useMutation({
+    mutationFn: (turnId: string) =>
+      unwrap(
+        api.POST("/chats/{chat_id}/turns/{turn_id}/retry", {
+          params: { path: { chat_id: chatId, turn_id: turnId } },
+        }),
+      ),
+  });
+}
+
+export function useRegenerate(chatId: string) {
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      unwrap(
+        api.POST("/chats/{chat_id}/messages/{message_id}/regenerate", {
+          params: { path: { chat_id: chatId, message_id: messageId } },
+        }),
+      ),
+  });
+}
+
+export function useDeletePending(chatId: string) {
+  return useMutation({
+    mutationFn: (messageId: string) =>
+      unwrap(
+        api.DELETE("/chats/{chat_id}/messages/{message_id}", {
+          params: { path: { chat_id: chatId, message_id: messageId } },
+        }),
+      ),
+  });
+}

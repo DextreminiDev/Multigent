@@ -71,6 +71,11 @@ class TypingIn(Frame):
     chat_id: uuid.UUID
 
 
+class CancelIn(Frame):
+    chat_id: uuid.UUID
+    turn_id: uuid.UUID
+
+
 class SendIn(Frame):
     chat_id: uuid.UUID
     client_msg_id: uuid.UUID
@@ -242,6 +247,8 @@ async def _handle(conn: Connection, hub: Hub, text: str) -> None:
             conn.send({"type": "ack", "ref": frame.ref})
         elif frame.type == "message.send":
             await _send(conn, SendIn.model_validate(raw))
+        elif frame.type == "turn.cancel":
+            await _cancel(conn, CancelIn.model_validate(raw))
         elif frame.type == "typing":
             await _typing(conn, TypingIn.model_validate(raw))
         else:
@@ -362,3 +369,12 @@ async def _typing(conn: Connection, msg: TypingIn) -> None:
         await set_typing(conn.ws.app.state.redis, msg.chat_id, conn.user_id, conn.user.name)
     if msg.ref:
         conn.send({"type": "ack", "ref": msg.ref})
+
+
+async def _cancel(conn: Connection, msg: CancelIn) -> None:
+    from app.turns.routes import request_cancel  # avoid an import cycle at module load
+
+    app = conn.ws.app
+    async with app.state.sessionmaker() as db:
+        status = await request_cancel(db, app.state.redis, msg.chat_id, msg.turn_id, conn.user_id)
+    conn.send({"type": "ack", "ref": msg.ref, "status": status})

@@ -30,6 +30,8 @@ export type LiveTurn = {
 
 export type FailedTurn = {
   id: string;
+  /** "stopped" = a user pressed Stop; "failed" = provider/system error */
+  kind: "failed" | "stopped";
   anchorSeq: number;
   errorCode: string;
   errorMessage: string;
@@ -189,6 +191,7 @@ function applyPersisted(s: LiveState, ev: ServerEvent): LiveState {
           ...s.failed,
           [id]: {
             id,
+            kind: "failed",
             anchorSeq,
             errorCode: String(p.error_code ?? "unknown"),
             errorMessage: String(p.error_message ?? "Something went wrong."),
@@ -198,6 +201,44 @@ function applyPersisted(s: LiveState, ev: ServerEvent): LiveState {
           },
         },
       };
+    }
+    case "turn.cancelled": {
+      const id = p.turn_id as string;
+      const ids = (p.message_ids as string[]) ?? [];
+      const anchorSeq = s.turn?.id === id && s.turn.startedSeq != null ? s.turn.startedSeq : ev.seq!;
+      return {
+        ...s,
+        messages: setStatus(s.messages, ids, "done", id),
+        turn: s.turn?.id === id ? null : s.turn,
+        failed: {
+          ...s.failed,
+          [id]: {
+            id,
+            kind: "stopped",
+            anchorSeq,
+            errorCode: "cancelled",
+            errorMessage: "Stopped",
+            detail: null,
+            partialText: (p.partial_text as string | null) ?? null,
+            requeued: false,
+          },
+        },
+      };
+    }
+    case "turn.retried": {
+      // the batch goes back in the queue (still pointing at the old turn)
+      const failed = { ...s.failed };
+      delete failed[p.turn_id as string];
+      return { ...s, failed, messages: setStatus(s.messages, p.message_ids as string[], "pending", undefined) };
+    }
+    case "message.superseded": {
+      const old = s.messages[p.message_id as string];
+      const messages = old ? { ...s.messages, [old.id]: { ...old, status: "superseded" } } : { ...s.messages };
+      return { ...s, messages: setStatus(messages, (p.message_ids as string[]) ?? [], "pending", undefined) };
+    }
+    case "message.updated": {
+      const m = p.message as ChatMessage;
+      return { ...s, messages: { ...s.messages, [m.id]: m } };
     }
     case "chat.updated": {
       const meta = { ...s.meta };
@@ -306,7 +347,7 @@ const INF = Number.MAX_SAFE_INTEGER;
 export function timeline(s: LiveState): TimelineItem[] {
   const items: TimelineItem[] = [];
   for (const m of Object.values(s.messages)) {
-    if (m.status === "superseded") continue;
+    if (m.status === "superseded" || m.status === "deleted") continue;
     const rank = m.kind === "ai" ? 1 : 0;
     items.push({ kind: "message", key: m.id, order: [m.anchor_seq, rank, m.seq], message: m });
   }
@@ -343,4 +384,26 @@ export function typingLabel(names: string[]): string | null {
   if (names.length === 1) return `${names[0]} is typing…`;
   if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
   return `${names.length} people are typing…`;
+}
+
+
+/** The most recent completed AI reply (the only one that can be regenerated). */
+export function lastAiMessageId(s: LiveState): string | null {
+  let best: ChatMessage | null = null;
+  for (const m of Object.values(s.messages)) {
+    if (m.kind === "ai" && m.status === "done" && (!best || m.seq > best.seq)) best = m;
+  }
+  return best?.id ?? null;
+}
+
+/** Author ids of the human messages a turn answered (for cancel/retry rights). */
+export function turnAuthorIds(s: LiveState, turnId: string): string[] {
+  if (s.turn?.id === turnId) return s.turn.authorIds;
+  return [
+    ...new Set(
+      Object.values(s.messages)
+        .filter((m) => m.kind === "human" && m.turn_id === turnId && m.author_id)
+        .map((m) => m.author_id as string),
+    ),
+  ];
 }

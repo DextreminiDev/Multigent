@@ -1,16 +1,23 @@
 "use client";
 
-import { KeyRound, Loader2, MessageSquareDashed, WifiOff } from "lucide-react";
+import { KeyRound, Loader2, MessageSquareDashed, Square, WifiOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Chat } from "@/lib/api/client";
-import { qk } from "@/lib/api/hooks";
+import {
+  qk,
+  useCancelTurn,
+  useDeletePending,
+  useRegenerate,
+  useRetryTurn,
+} from "@/lib/api/hooks";
+import { Button } from "@/components/ui/button";
 import { queuedCount, typingLabel, typingNames, type LiveState } from "@/lib/ws/reducer";
 import { Composer } from "./composer";
-import { MessageList } from "./message-list";
+import { MessageList, type TurnControls } from "./message-list";
 import { isChatReady, SetupChecklist } from "./setup-checklist";
 import type { LiveChat } from "./use-live-chat";
 
@@ -74,6 +81,18 @@ export function Conversation({
 }) {
   const router = useRouter();
   const qc = useQueryClient();
+  const cancel = useCancelTurn(chat.id);
+  const retry = useRetryTurn(chat.id);
+  const regenerate = useRegenerate(chat.id);
+  const del = useDeletePending(chat.id);
+  const isOwner = chat.role === "owner";
+  const onError = (e: Error) => toast.error(e.message);
+  const controls: TurnControls = {
+    isOwner,
+    onRetry: (id) => retry.mutate(id, { onError }),
+    onRegenerate: (id) => regenerate.mutate(id, { onError }),
+    onDelete: (id) => del.mutate(id, { onError }),
+  };
 
   useEffect(() => {
     if (live.state?.deleted) {
@@ -137,6 +156,7 @@ export function Conversation({
         onRetrySend={live.retrySend}
         onDiscardSend={live.discardSend}
         memberIds={memberIds}
+        controls={controls}
         header={header}
         empty={empty}
       />
@@ -153,6 +173,19 @@ export function Conversation({
           <Banner icon={<Loader2 className="size-4 animate-spin" />}>
             {waiting} {waiting === 1 ? "message" : "messages"} waiting for the next reply
           </Banner>
+        )}
+        {live.state.turn && (isOwner || live.state.turn.authorIds.includes(meId)) && (
+          <div className="mx-auto mb-1 flex w-full max-w-3xl justify-center">
+            <Button
+              size="sm"
+              variant="outline"
+              className="rounded-full"
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate(live.state!.turn!.id, { onError })}
+            >
+              <Square className="size-3 fill-current" /> Stop
+            </Button>
+          </div>
         )}
         <TypingIndicator state={live.state} meId={meId} />
         <div className="mx-auto w-full max-w-3xl">

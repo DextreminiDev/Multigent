@@ -22,7 +22,7 @@ from app.chats.schemas import (
     ProviderView,
 )
 from app.chats.service import build_chat_view, chat_view, key_view, member_counts, require
-from app.db.models import Chat, ChatKey, ChatMember, Message, User
+from app.db.models import Chat, ChatKey, ChatMember, Message, Turn, User
 from app.deps import AuthDep, CsrfAuthDep, DbDep, RedisDep, SettingsDep
 from app.errors import ApiError
 from app.events import Outbox
@@ -33,6 +33,7 @@ from app.providers.errors import ProviderError
 from app.security.keyvault import EncryptedKey, KeyVault, KeyVaultError
 from app.security.redaction import registered_secret
 from app.security.urls import UnsafeUrlError, assert_public_url
+from app.turns.runner import cancel_key
 from app.turns.schedule import wake
 
 router = APIRouter(tags=["chats"])
@@ -278,8 +279,12 @@ async def delete_key(chat_id: ChatId, auth: CsrfAuthDep, db: DbDep, redis: Redis
         )
         await db.commit()
         await outbox.publish(redis)
-        # In-flight turn cancellation is wired up with the turn engine (milestone 3/5);
-        # the worker also re-checks the key before every provider call.
+        # Stop any in-flight reply (spec §2.6): it's using the key being removed.
+        running = await db.scalar(
+            select(Turn.id).where(Turn.chat_id == chat_id, Turn.status == "running")
+        )
+        if running is not None:
+            await redis.set(cancel_key(running), str(auth.user.id), ex=600)
     return Response(status_code=204)
 
 

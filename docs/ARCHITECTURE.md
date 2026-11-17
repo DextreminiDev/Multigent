@@ -292,8 +292,9 @@ Outcome rules (what happens to the batch's messages):
 | `ContentBlocked`, `Unknown`, `ProviderUnavailable` (after retries) | `failed`, `partial_text` kept | stay `batched`; Retry button | active |
 | Worker crash / lock lost | sweeper: `failed` (`crash`) | **back to `pending`** (automatic rerun) | active |
 
-**Retry** creates a new turn (`trigger='retry'`) over the same batch plus any newer pending messages.
-**Regenerate** (owner only) marks the last AI message `superseded` (hidden by default, emits `message.superseded`) and creates a turn (`trigger='regenerate'`) over the same batch.
+**Retry** (`POST /chats/{id}/turns/{turn_id}/retry`; owner, or an editor whose message is in the batch) puts a failed/stopped batch back to `pending` and emits `turn.retried`. The messages keep pointing at the old turn, so the next claim labels its turn `trigger='retry'` (or `'regenerate'` if that old turn completed) without extra state, and naturally includes any newer pending messages.
+**Regenerate** (`POST /chats/{id}/messages/{ai_id}/regenerate`; owner only, latest reply only, not while a turn runs) marks that AI message `superseded` (kept, hidden, excluded from prompts), re-queues its batch and emits `message.superseded`.
+**Delete own pending** (`DELETE /chats/{id}/messages/{msg_id}`): the author can withdraw a message that is still `pending`. The row is locked first and claims use `SKIP LOCKED`, so a message can't be batched mid-delete; content is blanked and `message.updated` is emitted.
 
 ### 6.4b Logical order of AI replies
 
@@ -306,14 +307,14 @@ The AI message is inserted at completion, so its `seq` is *higher* than any mess
 
 - **Scheduler loop** (every worker, ~200 ms): `ZRANGEBYSCORE chat:due -inf now LIMIT 0 N` → claim as in §6.3. Concurrency bounded by a semaphore (`WORKER_MAX_CONCURRENT_TURNS`, default 20).
 - **Lazy orphan recovery** (milestone 3): a worker that acquires the chat lock and finds a turn still `running` knows its owner lost the lock. It fails that turn (`crash`) and returns the batch to pending inside the same claim transaction, so a new message always unsticks a chat. The periodic sweeper (milestone 5) does this proactively.
-- **Sweeper** (every 5 s, guarded by a Redis leader lock so only one runs):
+- **Sweeper** (every 5 s; one leader at a time via a renewable Redis lease `sweeper:leader`, resigned on graceful shutdown). Implemented in `app/turns/sweeper.py`; it only *wakes* chats, and the claim under the chat lock does the actual recovery:
   1. `chats` with pending human messages, no live lock key, no `running` turn → `ZADD chat:due`.
   2. `turns` with `status='running'` and no live lock key (TTL expired) → mark `failed(crash)`, return batch messages to `pending`, emit events, re-schedule.
 - Redis flushed or restarted: sweeper rebuilds `chat:due` from Postgres within seconds. This is the I6 guarantee.
 
 ### 6.6 Cancel
 
-`turn.cancel` → authz (owner, or editor whose message is in the batch) → `PUBLISH turn:{id}:cancel`. The runner holds an `asyncio.Event`; on set it aborts the provider stream, writes `cancelled` with fencing. Idempotent: cancelling a turn already `completed` is a no-op returning the current state (edge case 17).
+`POST /chats/{id}/turns/{turn_id}/cancel` or WS `turn.cancel` → authz (owner, or editor whose message is in the batch) → `SET turn:{id}:cancel <user>` (10 min TTL). The runner streams in one task and runs a watcher in another that polls that key (and the lock-lost flag) every 200 ms, so Stop works even while the provider is silent. On cancel it aborts the stream, keeps the partial text on the turn, marks the batch `done` (answered-as-attempted, Retry available), records partial usage, and emits `turn.cancelled`, all fenced. Idempotent: cancelling a turn that already finished returns its final status (edge case 17). Deleting the chat's key also cancels the running turn (§11.3).
 
 ---
 
@@ -558,7 +559,7 @@ class KeyVault(Protocol):
 |---|---|
 | I1 | Fire 200 concurrent sends with `asyncio.gather`; assert `seq` strictly increasing with no gaps; replay from any `after_seq` reconstructs identical state |
 | I2 | Duplicate `client_msg_id` ×10 → 1 row; kill worker mid-turn (cancel task + drop lock) → sweeper requeues, message answered exactly once |
-| I3 | N workers + M chats under stress with `FakeProvider` delays; a watcher asserts never more than one `running` turn per chat (also try to violate the DB index directly) |
+| I3 | N workers + M chats under stress with `FakeProvider` delays; a watcher asserts never more than one `running` turn per chat (also try to violate the DB index directly). `test_stress_many_users_many_messages_many_workers`: 3 workers, 3 chats, 4 users × 8 messages with a short debounce so turns overlap with arrivals; asserts gapless seq, each message batched exactly once, one AI reply per turn |
 | I4 | `test_key_never_leaks` (§11.4) |
 | I5 | Table-driven `(role × action)` matrix; removed member's open socket receives `kicked` and later sends are rejected |
 | I6 | Flush Redis mid-test; system self-heals via sweeper |

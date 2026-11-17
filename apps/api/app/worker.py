@@ -7,7 +7,7 @@ WORKER_MAX_CONCURRENT_TURNS. Also records a heartbeat in Redis
 gracefully: stop claiming, give in-flight turns SHUTDOWN_GRACE_S, then cancel
 (their locks expire and the batch is recovered on the next claim/sweep).
 
-The periodic sweeper (crash recovery without a new message) arrives in milestone 5.
+The elected sweeper re-queues orphaned turns and lost wake-ups (app/turns/sweeper.py).
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ from app.providers.registry import ProviderRegistry
 from app.redis_client import make_redis
 from app.turns.runner import TurnRunner
 from app.turns.schedule import claim_wakeup, due_chats
+from app.turns.sweeper import Sweeper
 
 HEARTBEAT_KEY = "worker:{worker_id}:tick"
 HEARTBEAT_INDEX = "workers:alive"
@@ -43,11 +44,22 @@ log = get_logger("worker")
 
 
 class Worker:
-    def __init__(self, settings: Settings, redis: Redis, runner: TurnRunner | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        redis: Redis,
+        runner: TurnRunner | None = None,
+        sweep_interval_s: float = 5.0,
+    ) -> None:
         self.settings = settings
         self.redis = redis
         self.runner = runner
         self.worker_id = f"{socket.gethostname()}-{os.getpid()}-{uuid7().hex[-6:]}"
+        self.sweeper = (
+            Sweeper(runner.sessionmaker, redis, self.worker_id, sweep_interval_s)
+            if runner is not None
+            else None
+        )
         self._stop = asyncio.Event()
         self._last_beat = 0.0
         self._tasks: set[asyncio.Task[None]] = set()
@@ -81,6 +93,11 @@ class Worker:
         await self.heartbeat()
         if self.runner is None or self._stop.is_set():
             return
+        if self.sweeper is not None:
+            try:
+                await self.sweeper.maybe_sweep()
+            except Exception:
+                log.exception("worker.sweep_failed")
         free = self.settings.worker_max_concurrent_turns - len(self._tasks)
         if free <= 0:
             return
@@ -111,6 +128,8 @@ class Worker:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop.wait(), TICK_S)
         await self.drain(self.settings.shutdown_grace_s)
+        if self.sweeper is not None:
+            await self.sweeper.resign()
         await self.redis.zrem(HEARTBEAT_INDEX, self.worker_id)
         await self.redis.delete(HEARTBEAT_KEY.format(worker_id=self.worker_id))
         log.info("worker.stopped", worker_id=self.worker_id)

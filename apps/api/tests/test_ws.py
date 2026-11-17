@@ -435,3 +435,27 @@ async def test_typing_indicator_and_permissions(clients: Any, validator: StubVal
     await bob.until(lambda f: f["type"] == "member.updated")
     ref = await bob.send("typing", chat_id=cid)
     assert (await bob.until(lambda f: f.get("ref") == ref))["code"] == "forbidden"
+
+
+async def test_cancel_over_websocket(
+    clients: Any, validator: StubValidator, runner: TurnRunner, providers: ProviderRegistry
+) -> None:
+    owner = await clients("Alice")
+    cid = await ready(owner, validator)
+    providers.fake.script = FakeScript(chunks=[f"w{i} " for i in range(50)], delay_s=0.05)
+    await owner.connect()
+    await owner.ack(await owner.send("subscribe", chat_id=cid, after_seq=0))
+    await owner.ack(
+        await owner.send("message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), content="go")
+    )
+    task = asyncio.create_task(runner.run_chat(uuid.UUID(cid)))
+    started = await owner.until(lambda f: f["type"] == "turn.started")
+    await owner.until(lambda f: f["type"] == "turn.delta")
+    ack = await owner.ack(
+        await owner.send("turn.cancel", chat_id=cid, turn_id=started["payload"]["turn_id"])
+    )
+    assert ack["status"] == "cancelling"
+    stopped = await owner.until(lambda f: f["type"] == "turn.cancelled")
+    await task
+    assert stopped["payload"]["cancelled_by"] == owner.id
+    assert stopped["payload"]["partial_text"].startswith("w0")

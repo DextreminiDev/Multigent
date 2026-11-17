@@ -988,6 +988,33 @@
         "title": "SendOut",
         "type": "object"
       },
+      "TurnControlOut": {
+        "properties": {
+          "status": {
+            "enum": [
+              "cancelling",
+              "running",
+              "completed",
+              "failed",
+              "cancelled",
+              "retrying"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "turn_id": {
+            "format": "uuid",
+            "title": "Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "turn_id",
+          "status"
+        ],
+        "title": "TurnControlOut",
+        "type": "object"
+      },
       "UserRef": {
         "properties": {
           "avatar_color": {
@@ -1847,6 +1874,107 @@
         ]
       }
     },
+    "/chats/{chat_id}/messages/{message_id}": {
+      "delete": {
+        "description": "Authors may withdraw a message while it is still queued. The row is locked\nfirst, and the claim uses SKIP LOCKED, so it can't be batched mid-delete.",
+        "operationId": "delete_pending_message_chats__chat_id__messages__message_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Pending Message",
+        "tags": [
+          "turns"
+        ]
+      }
+    },
+    "/chats/{chat_id}/messages/{message_id}/regenerate": {
+      "post": {
+        "description": "Owner only, last AI reply only. The old reply is kept but `superseded`\n(hidden), and its batch is answered again (trigger='regenerate').",
+        "operationId": "regenerate_chats__chat_id__messages__message_id__regenerate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Message Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnControlOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Regenerate",
+        "tags": [
+          "turns"
+        ]
+      }
+    },
     "/chats/{chat_id}/models": {
       "get": {
         "operationId": "list_models_chats__chat_id__models_get",
@@ -1931,6 +2059,113 @@
         "summary": "Chat State",
         "tags": [
           "messages"
+        ]
+      }
+    },
+    "/chats/{chat_id}/turns/{turn_id}/cancel": {
+      "post": {
+        "operationId": "cancel_turn_chats__chat_id__turns__turn_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnControlOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Turn",
+        "tags": [
+          "turns"
+        ]
+      }
+    },
+    "/chats/{chat_id}/turns/{turn_id}/retry": {
+      "post": {
+        "description": "Put a failed/stopped batch back in the queue. The messages keep pointing at\nthis turn, so the next claim runs as trigger='retry' (with any newer messages).",
+        "operationId": "retry_turn_chats__chat_id__turns__turn_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "turn_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Turn Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnControlOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Turn",
+        "tags": [
+          "turns"
         ]
       }
     },

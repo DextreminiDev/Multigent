@@ -1,13 +1,23 @@
 "use client";
 
-import { AlertTriangle, ArrowDown, Clock, RotateCw, Sparkles, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  Clock,
+  RefreshCw,
+  RotateCw,
+  Sparkles,
+  Square,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "@/components/avatar";
 import { CopyButton, Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import type { ChatMessage } from "@/lib/api/client";
 import type { FailedTurn, LiveState, LiveTurn, PendingSend } from "@/lib/ws/reducer";
-import { timeline } from "@/lib/ws/reducer";
+import { lastAiMessageId, timeline, turnAuthorIds } from "@/lib/ws/reducer";
 import { cn } from "@/lib/utils";
 
 function time(iso: string | null | undefined): string {
@@ -15,6 +25,13 @@ function time(iso: string | null | undefined): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
+
+export type TurnControls = {
+  isOwner: boolean;
+  onRetry: (turnId: string) => void;
+  onRegenerate: (messageId: string) => void;
+  onDelete: (messageId: string) => void;
+};
 
 function AiFrame({
   children,
@@ -58,11 +75,13 @@ function HumanMessage({
   mine,
   queued,
   former,
+  onDelete,
 }: {
   m: ChatMessage;
   mine: boolean;
   queued: "next" | "waiting" | null;
   former: boolean;
+  onDelete?: () => void;
 }) {
   return (
     <article
@@ -88,6 +107,16 @@ function HumanMessage({
           <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="size-3" aria-hidden />
             {queued === "next" ? "Queued · will be answered next" : "Waiting to be answered"}
+            {onDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="ml-1 inline-flex items-center gap-0.5 rounded px-1 hover:bg-muted hover:text-foreground"
+                aria-label="Delete this queued message"
+              >
+                <Trash2 className="size-3" /> Delete
+              </button>
+            )}
           </span>
         )}
       </div>
@@ -151,7 +180,35 @@ function StreamingMessage({ turn, names }: { turn: LiveTurn; names: string[] }) 
   );
 }
 
-function FailedMessage({ f, names }: { f: FailedTurn; names: string[] }) {
+function FailedMessage({
+  f,
+  names,
+  onRetry,
+}: {
+  f: FailedTurn;
+  names: string[];
+  onRetry?: () => void;
+}) {
+  const retry = onRetry && !f.requeued && (
+    <Button size="xs" variant="outline" className="mt-2" onClick={onRetry}>
+      <RotateCw /> Retry
+    </Button>
+  );
+  if (f.kind === "stopped") {
+    return (
+      <AiFrame replyingTo={names} label="Assistant reply stopped">
+        {f.partialText ? (
+          <Markdown text={f.partialText} className="opacity-80" />
+        ) : (
+          <p className="text-sm text-muted-foreground">No text yet.</p>
+        )}
+        <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+          <Square className="size-3" aria-hidden /> Stopped
+        </p>
+        {retry}
+      </AiFrame>
+    );
+  }
   return (
     <AiFrame replyingTo={names} label="Assistant reply failed">
       {f.partialText && <Markdown text={f.partialText} className="opacity-70" />}
@@ -169,6 +226,7 @@ function FailedMessage({ f, names }: { f: FailedTurn; names: string[] }) {
           )}
         </span>
       </p>
+      {retry}
     </AiFrame>
   );
 }
@@ -181,6 +239,7 @@ export function MessageList({
   onRetrySend,
   onDiscardSend,
   memberIds = null,
+  controls,
   header,
   empty,
 }: {
@@ -192,6 +251,7 @@ export function MessageList({
   onDiscardSend: (id: string) => void;
   /** current member ids (null while loading): others are "former members" */
   memberIds?: Set<string> | null;
+  controls?: TurnControls;
   header?: React.ReactNode;
   empty: React.ReactNode;
 }) {
@@ -233,6 +293,9 @@ export function MessageList({
   }, [state.completedCount]);
 
   const turnRunning = Boolean(state.turn);
+  const lastAi = lastAiMessageId(state);
+  const canRetry = (turnId: string) =>
+    Boolean(controls) && (controls!.isOwner || turnAuthorIds(state, turnId).includes(meId));
 
   return (
     <div className="relative min-h-0 flex-1">
@@ -261,8 +324,18 @@ export function MessageList({
                       label="Assistant said"
                       replyingTo={m.turn_id ? (namesByTurn[m.turn_id] ?? []) : []}
                       footer={
-                        <div className="mt-1 opacity-0 transition-opacity group-hover/ai:opacity-100 focus-within:opacity-100">
+                        <div className="mt-1 flex items-center gap-1 opacity-0 transition-opacity group-hover/ai:opacity-100 focus-within:opacity-100">
                           <CopyButton text={m.content} />
+                          {controls?.isOwner && m.id === lastAi && !turnRunning && (
+                            <button
+                              type="button"
+                              onClick={() => controls.onRegenerate(m.id)}
+                              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                              <RefreshCw className="size-3.5" />
+                              <span className="sr-only sm:not-sr-only">Regenerate</span>
+                            </button>
+                          )}
                         </div>
                       }
                     >
@@ -288,6 +361,11 @@ export function MessageList({
                     mine={m.author_id === meId}
                     queued={queued}
                     former={former}
+                    onDelete={
+                      controls && m.author_id === meId && m.status === "pending"
+                        ? () => controls.onDelete(m.id)
+                        : undefined
+                    }
                   />
                 );
               }
@@ -299,6 +377,9 @@ export function MessageList({
                     key={it.key}
                     f={it.failed}
                     names={namesByTurn[it.failed.id] ?? []}
+                    onRetry={
+                      canRetry(it.failed.id) ? () => controls!.onRetry(it.failed.id) : undefined
+                    }
                   />
                 );
               case "sending":

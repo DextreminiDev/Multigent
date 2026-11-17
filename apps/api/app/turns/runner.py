@@ -7,6 +7,7 @@ See ARCHITECTURE.md §6.3-§6.4. Every write after the claim is fenced on
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import time
@@ -67,6 +68,11 @@ def buffer_key(turn_id: uuid.UUID | str) -> str:
     return f"turn:{turn_id}:buf"
 
 
+def cancel_key(turn_id: uuid.UUID | str) -> str:
+    """Set by the cancel endpoint (value = who asked); polled by the running turn."""
+    return f"turn:{turn_id}:cancel"
+
+
 @dataclass
 class Claim:
     turn_id: uuid.UUID
@@ -89,6 +95,7 @@ class StreamResult:
     finish: str = "stop"
     error: ProviderError | None = None
     lost_lock: bool = False
+    cancelled: bool = False
     chunks: int = 0
 
 
@@ -137,6 +144,7 @@ class TurnRunner:
     providers: ProviderRegistry = field(default_factory=ProviderRegistry)
     lock_ttl_ms: int = 30_000
     heartbeat_s: float = 10.0
+    cancel_poll_s: float = 0.2
 
     # ------------------------------------------------------------------ entry
 
@@ -265,11 +273,19 @@ class TurnRunner:
                 await outbox.publish(self.redis)
                 return None
 
+            # Messages put back by Retry/Regenerate still point at their previous turn.
+            prior = {m.turn_id for m in pending if m.turn_id is not None}
+            trigger = "batch"
+            if prior:
+                statuses = set(
+                    (await db.scalars(select(Turn.status).where(Turn.id.in_(prior)))).all()
+                )
+                trigger = "regenerate" if "completed" in statuses else "retry"
             turn = Turn(
                 id=uuid7(),
                 chat_id=chat_id,
                 status="running",
-                trigger="batch",
+                trigger=trigger,
                 lock_token=token,
                 provider=chat.provider,
                 model=chat.model,
@@ -293,7 +309,7 @@ class TurnRunner:
                 "turn.started",
                 {
                     "turn_id": str(turn.id),
-                    "trigger": "batch",
+                    "trigger": trigger,
                     "message_ids": [str(i) for i in message_ids],
                     "author_ids": [str(a) for a in author_ids],
                     "provider": chat.provider,
@@ -396,7 +412,9 @@ class TurnRunner:
         if result.lost_lock:
             log.warning("turn.lock_lost", turn_id=str(claim.turn_id))
             return
-        if result.error is None:
+        if result.cancelled:
+            await self.finish_cancelled(claim, result)
+        elif result.error is None:
             await self.finish_completed(claim, result)
         else:
             await self.finish_failed(claim, result)
@@ -411,25 +429,51 @@ class TurnRunner:
     ) -> None:
         provider = self.providers.get(claim.ctx.provider)
         pub = DeltaPublisher(self.redis, claim.chat_id, claim.turn_id)
-        stream = provider.stream_chat(req, api_key)
-        try:
-            async for chunk in stream:
+
+        async def consume() -> None:
+            stream = provider.stream_chat(req, api_key)
+            try:
+                async for chunk in stream:
+                    if isinstance(chunk, TextDelta):
+                        result.text += chunk.text
+                        result.chunks += 1
+                        await pub.add(chunk.text)
+                    elif isinstance(chunk, Usage):
+                        result.usage = chunk
+                    elif isinstance(chunk, Finish):
+                        result.finish = chunk.reason
+            finally:
+                await pub.flush()
+                aclose = getattr(stream, "aclose", None)
+                if aclose is not None:
+                    await aclose()
+
+        async def watch() -> str:
+            """Interrupt the stream on user cancel or lost lock, even while the
+            provider is silent (polling a Redis key is cheap at ~5/s per turn)."""
+            while True:
                 if lock.lost.is_set():
-                    result.lost_lock = True
-                    return
-                if isinstance(chunk, TextDelta):
-                    result.text += chunk.text
-                    result.chunks += 1
-                    await pub.add(chunk.text)
-                elif isinstance(chunk, Usage):
-                    result.usage = chunk
-                elif isinstance(chunk, Finish):
-                    result.finish = chunk.reason
+                    return "lost"
+                if await self.redis.exists(cancel_key(claim.turn_id)):
+                    return "cancel"
+                await asyncio.sleep(self.cancel_poll_s)
+
+        streamer = asyncio.create_task(consume())
+        watcher = asyncio.create_task(watch())
+        try:
+            done, _ = await asyncio.wait({streamer, watcher}, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            await pub.flush()
-            aclose = getattr(stream, "aclose", None)
-            if aclose is not None:
-                await aclose()
+            for t in (streamer, watcher):
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(streamer, watcher, return_exceptions=True)
+        if streamer in done:
+            streamer.result()  # re-raise provider errors
+            return
+        if watcher.result() == "lost":
+            result.lost_lock = True
+        else:
+            result.cancelled = True
 
     # ------------------------------------------------------------------ finish
 
@@ -521,6 +565,57 @@ class TurnRunner:
             tokens_in=tokens_in,
             tokens_out=tokens_out,
         )
+
+    async def finish_cancelled(self, claim: Claim, result: StreamResult) -> None:
+        """User pressed Stop: keep the partial text on the turn, mark the batch as
+        answered-as-attempted (`done`); anyone allowed can hit Retry (§6.4)."""
+        now = dt.datetime.now(dt.UTC)
+        by = await self.redis.get(cancel_key(claim.turn_id))
+        tokens_out = estimate_tokens(result.text) if result.text else 0
+        outbox = Outbox()
+        async with self.sessionmaker() as db:
+            await db.scalar(select(Chat.id).where(Chat.id == claim.chat_id).with_for_update())
+            if not await self._fence(
+                db,
+                claim,
+                status="cancelled",
+                finished_at=now,
+                partial_text=result.text or None,
+                tokens_out=tokens_out,
+            ):
+                await db.rollback()
+                return
+            await db.execute(
+                update(Message)
+                .where(Message.id.in_(claim.message_ids), Message.status == "batched")
+                .values(status="done")
+            )
+            if tokens_out:  # partial output still cost the owner tokens
+                db.add(
+                    UsageEvent(
+                        chat_id=claim.chat_id,
+                        turn_id=claim.turn_id,
+                        kind="turn",
+                        tokens_in=result.usage.tokens_in if result.usage else 0,
+                        tokens_out=tokens_out,
+                        day=now.date(),
+                    )
+                )
+            await outbox.append(
+                db,
+                claim.chat_id,
+                "turn.cancelled",
+                {
+                    "turn_id": str(claim.turn_id),
+                    "message_ids": [str(i) for i in claim.message_ids],
+                    "partial_text": result.text or None,
+                    "cancelled_by": str(by) if by else None,
+                },
+            )
+            await db.commit()
+        await outbox.publish(self.redis)
+        await self.redis.delete(buffer_key(claim.turn_id), cancel_key(claim.turn_id))
+        log.info("turn.cancelled", chat_id=str(claim.chat_id), turn_id=str(claim.turn_id))
 
     async def finish_failed(self, claim: Claim, result: StreamResult) -> None:
         err = result.error or Unknown()
