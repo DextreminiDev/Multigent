@@ -11,10 +11,12 @@ export const MAX_MESSAGE_CHARS = 8000;
  *  user can't send (viewer, no key, paused...), shown in place of the input. */
 export function Composer({
   onSend,
+  onType,
   disabledReason,
   hint,
 }: {
   onSend: (text: string) => void;
+  onType?: () => void;
   disabledReason?: string | null;
   hint?: string | null;
 }) {
@@ -63,7 +65,10 @@ export function Composer({
         rows={1}
         value={text}
         placeholder="Message everyone…"
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value.trim()) onType?.();
+        }}
         onCompositionStart={() => (composing.current = true)}
         onCompositionEnd={() => (composing.current = false)}
         onKeyDown={(e) => {

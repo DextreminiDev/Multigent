@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, unwrap } from "@/lib/api/client";
-import { qk } from "@/lib/api/hooks";
+import { qk, qkm } from "@/lib/api/hooks";
 import { API_URL } from "@/lib/config";
 import { getWsClient, WsRequestError, type ConnStatus } from "@/lib/ws/client";
 import {
@@ -33,7 +33,11 @@ export type LiveChat = {
   send: (content: string) => void;
   retrySend: (clientMsgId: string) => void;
   discardSend: (clientMsgId: string) => void;
+  /** call on composer input; throttled to one frame per 2 s */
+  notifyTyping: () => void;
 };
+
+const TYPING_THROTTLE_MS = 2000;
 
 /**
  * Live state for one chat: load a consistent snapshot (`GET /chats/{id}/state`),
@@ -69,9 +73,12 @@ export function useLiveChat(chatId: string): LiveChat {
       const next = applyEvent(cur, ev);
       if (next === cur) return;
       commit(next);
-      if (ev.type === "chat.updated" || ev.type === "key.status") {
+      if (ev.type === "chat.updated" || ev.type === "key.status" || ev.type === "member.updated") {
         qc.invalidateQueries({ queryKey: qk.chat(chatId) });
         qc.invalidateQueries({ queryKey: qk.chats, exact: true });
+      }
+      if (ev.type === "member.updated") {
+        qc.invalidateQueries({ queryKey: qkm.members(chatId) });
       }
     },
     [chatId, commit, qc],
@@ -129,6 +136,7 @@ export function useLiveChat(chatId: string): LiveChat {
     (content: string) => {
       if (!ref.current) return;
       const clientMsgId = newId();
+      lastTyping.current = 0;
       commit(
         addPendingSend(ref.current, {
           clientMsgId,
@@ -159,5 +167,13 @@ export function useLiveChat(chatId: string): LiveChat {
     [commit],
   );
 
-  return { state, error, connection, send, retrySend, discardSend };
+  const lastTyping = useRef(0);
+  const notifyTyping = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTyping.current < TYPING_THROTTLE_MS) return;
+    lastTyping.current = now;
+    client.typing(chatId);
+  }, [chatId, client]);
+
+  return { state, error, connection, send, retrySend, discardSend, notifyTyping };
 }

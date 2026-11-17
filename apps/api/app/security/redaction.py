@@ -25,6 +25,7 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?i)(authorization:\s*bearer\s+)[^\s\"']+"),
     re.compile(r"(?i)(x-api-key:\s*)[^\s\"']+"),
     re.compile(r"(?i)(x-goog-api-key:\s*)[^\s\"']+"),
+    re.compile(r"(/invites/)[A-Za-z0-9_\-]{20,}"),  # invite tokens in URL paths
 )
 
 _registered: ContextVar[tuple[str, ...]] = ContextVar("_registered_secrets", default=())

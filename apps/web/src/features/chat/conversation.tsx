@@ -2,15 +2,17 @@
 
 import { KeyRound, Loader2, MessageSquareDashed, WifiOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Chat } from "@/lib/api/client";
-import { queuedCount } from "@/lib/ws/reducer";
+import { qk } from "@/lib/api/hooks";
+import { queuedCount, typingLabel, typingNames, type LiveState } from "@/lib/ws/reducer";
 import { Composer } from "./composer";
 import { MessageList } from "./message-list";
 import { isChatReady, SetupChecklist } from "./setup-checklist";
-import { useLiveChat } from "./use-live-chat";
+import type { LiveChat } from "./use-live-chat";
 
 export function composerBlockReason(chat: Chat): string | null {
   if (chat.role === "viewer") return "You're a viewer here: you can read along live, but not send messages.";
@@ -40,16 +42,51 @@ function Banner({ icon, children }: { icon: React.ReactNode; children: React.Rea
   );
 }
 
-export function Conversation({ chat, meId }: { chat: Chat; meId: string }) {
-  const live = useLiveChat(chat.id);
+function TypingIndicator({ state, meId }: { state: LiveState; meId: string }) {
+  // re-render every second while someone is typing so stale entries expire
+  const [, tick] = useState(0);
+  const active = typingNames(state, meId);
+  useEffect(() => {
+    if (active.length === 0) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [active.length]);
+  const label = typingLabel(active);
+  return (
+    <div className="mx-auto h-5 w-full max-w-3xl px-1 text-xs text-muted-foreground" aria-live="polite">
+      {label}
+    </div>
+  );
+}
+
+export function Conversation({
+  chat,
+  meId,
+  live,
+  memberIds,
+  onInvite,
+}: {
+  chat: Chat;
+  meId: string;
+  live: LiveChat;
+  memberIds: Set<string> | null;
+  onInvite: () => void;
+}) {
   const router = useRouter();
+  const qc = useQueryClient();
 
   useEffect(() => {
     if (live.state?.deleted) {
       toast("This chat was deleted by its owner.");
+      qc.invalidateQueries({ queryKey: qk.chats, exact: true });
+      router.replace("/");
+    } else if (live.state?.kicked) {
+      toast("You're no longer a member of this chat.");
+      qc.invalidateQueries({ queryKey: qk.chats, exact: true });
+      qc.removeQueries({ queryKey: qk.chat(chat.id) });
       router.replace("/");
     }
-  }, [live.state?.deleted, router]);
+  }, [live.state?.deleted, live.state?.kicked, router, qc, chat.id]);
 
   if (live.error) {
     return (
@@ -73,7 +110,7 @@ export function Conversation({ chat, meId }: { chat: Chat; meId: string }) {
 
   const header = ownerSetup ? (
     <div className="pb-4 sm:pt-4">
-      <SetupChecklist chat={chat} />
+      <SetupChecklist chat={chat} onInvite={onInvite} />
     </div>
   ) : null;
 
@@ -99,6 +136,7 @@ export function Conversation({ chat, meId }: { chat: Chat; meId: string }) {
         paused={Boolean(pause)}
         onRetrySend={live.retrySend}
         onDiscardSend={live.discardSend}
+        memberIds={memberIds}
         header={header}
         empty={empty}
       />
@@ -116,9 +154,11 @@ export function Conversation({ chat, meId }: { chat: Chat; meId: string }) {
             {waiting} {waiting === 1 ? "message" : "messages"} waiting for the next reply
           </Banner>
         )}
+        <TypingIndicator state={live.state} meId={meId} />
         <div className="mx-auto w-full max-w-3xl">
           <Composer
             onSend={live.send}
+            onType={live.notifyTyping}
             disabledReason={blocked}
             hint={chat.role !== "owner" ? "Replies use the owner's key, even when they're offline." : null}
           />

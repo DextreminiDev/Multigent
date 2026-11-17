@@ -42,6 +42,11 @@ def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level)
+    # uvicorn installs its own handlers (bypassing our redaction): route through root.
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        lg = logging.getLogger(name)
+        lg.handlers.clear()
+        lg.propagate = True
     # Never log provider HTTP traffic (headers/bodies may carry keys).
     for noisy in ("httpx", "httpcore", "LiteLLM", "litellm"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

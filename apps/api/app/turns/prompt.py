@@ -99,11 +99,25 @@ def _time(ts: dt.datetime) -> str:
     return ts.astimezone(dt.UTC).strftime("%H:%M")
 
 
+def participant_labels(participants: Sequence[Participant]) -> dict[uuid.UUID, str]:
+    """Display names are not unique, but the model must tell people apart: later
+    namesakes get " (2)", " (3)"... Parentheses can't occur in sanitized names, so a
+    real user can never be confused with a disambiguated one."""
+    seen: dict[str, int] = {}
+    labels: dict[uuid.UUID, str] = {}
+    for p in participants:  # caller passes them in join order
+        n = seen.get(p.name.casefold(), 0) + 1
+        seen[p.name.casefold()] = n
+        labels[p.user_id] = p.name if n == 1 else f"{p.name} ({n})"
+    return labels
+
+
 def render_roster(participants: Sequence[Participant]) -> str:
+    labels = participant_labels(participants)
     lines = [f"Participants ({len(participants)}):"]
-    for p in sorted(participants, key=lambda p: (p.role != "owner", p.name.lower())):
+    for p in sorted(participants, key=lambda p: (p.role != "owner", labels[p.user_id].lower())):
         label = {"owner": "owner", "editor": "can send messages", "viewer": "viewer, read-only"}
-        lines.append(f"- {escape_attr(p.name)} ({label[p.role]})")
+        lines.append(f"- {escape_attr(labels[p.user_id])} ({label[p.role]})")
     return "\n".join(lines)
 
 
@@ -124,9 +138,17 @@ def render_system(
     return "\n\n".join(parts)
 
 
-def render_human(item: HistoryItem, roles: Mapping[uuid.UUID, str]) -> str:
-    name = item.author_name or "Unknown"
-    role = roles.get(item.author_id, "former member") if item.author_id else "former member"
+def render_human(
+    item: HistoryItem,
+    roles: Mapping[uuid.UUID, str],
+    labels: Mapping[uuid.UUID, str] | None = None,
+) -> str:
+    aid = item.author_id
+    if aid is not None and aid in roles:
+        name = (labels or {}).get(aid) or item.author_name or "Unknown"
+        role = roles[aid]
+    else:
+        name, role = item.author_name or "Unknown", "former member"
     return (
         f'<message from="{escape_attr(name)}" role="{escape_attr(role)}" '
         f'time="{_time(item.created_at)}">\n{escape_text(item.content)}\n</message>'
@@ -140,6 +162,7 @@ def render_history(
     human/event items into one user message (Gemini and Anthropic require
     alternating roles). Only pass items that should be shown to the model."""
     roles = {p.user_id: p.role for p in participants}
+    labels = participant_labels(participants)
     out: list[Msg] = []
     pending_user: list[str] = []
 
@@ -154,7 +177,7 @@ def render_history(
             if out:  # an assistant message can't lead the conversation
                 out.append(Msg("assistant", item.content))
         elif item.kind == "human":
-            pending_user.append(render_human(item, roles))
+            pending_user.append(render_human(item, roles, labels))
         else:
             pending_user.append(f"<event>{escape_text(item.content)}</event>")
     flush()

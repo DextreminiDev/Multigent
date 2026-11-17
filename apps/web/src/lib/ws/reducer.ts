@@ -63,6 +63,14 @@ export type LiveState = {
   meta: ChatMeta;
   needsResync: boolean;
   deleted: boolean;
+  /** removed from the chat (or left) while connected */
+  kicked: boolean;
+  /** user ids with a live connection to this chat */
+  online: string[];
+  /** user id -> who is typing and until when (epoch ms) */
+  typing: Record<string, { name: string; until: number }>;
+  /** bumps on member.updated so the UI can refetch members */
+  membersVersion: number;
   /** bumps when a reply finishes, for the aria-live announcer */
   completedCount: number;
 };
@@ -95,6 +103,10 @@ export function initialState(
     meta: {},
     needsResync: false,
     deleted: false,
+    kicked: false,
+    online: [],
+    typing: {},
+    membersVersion: 0,
     completedCount: 0,
   };
 }
@@ -129,7 +141,13 @@ function applyPersisted(s: LiveState, ev: ServerEvent): LiveState {
       const m = p.message as ChatMessage;
       const pendingSends = { ...s.pendingSends };
       if (m.client_msg_id) delete pendingSends[m.client_msg_id];
-      return { ...s, messages: { ...s.messages, [m.id]: m }, pendingSends };
+      // a sent message ends that person's "typing…"
+      let typing = s.typing;
+      if (m.author_id && typing[m.author_id]) {
+        typing = { ...typing };
+        delete typing[m.author_id];
+      }
+      return { ...s, messages: { ...s.messages, [m.id]: m }, pendingSends, typing };
     }
     case "turn.started": {
       const ids = p.message_ids as string[];
@@ -188,6 +206,8 @@ function applyPersisted(s: LiveState, ev: ServerEvent): LiveState {
       if ("status" in p) meta.status = p.status as string;
       return { ...s, meta };
     }
+    case "member.updated":
+      return { ...s, membersVersion: s.membersVersion + 1 };
     case "key.status":
       return {
         ...s,
@@ -202,9 +222,10 @@ function applyPersisted(s: LiveState, ev: ServerEvent): LiveState {
   }
 }
 
-export function applyEvent(s: LiveState, ev: ServerEvent): LiveState {
+export function applyEvent(s: LiveState, ev: ServerEvent, now: number = Date.now()): LiveState {
   if (ev.type === "resync_required") return { ...s, needsResync: true };
   if (ev.type === "chat.deleted") return { ...s, deleted: true };
+  if (ev.type === "kicked") return { ...s, kicked: true };
 
   if (typeof ev.seq === "number") {
     if (ev.seq <= s.lastSeq) return s; // duplicate (replay overlap)
@@ -222,6 +243,16 @@ export function applyEvent(s: LiveState, ev: ServerEvent): LiveState {
         ? s.turn
         : { id, startedSeq: null, messageIds: [], authorIds: [], chunks: {}, text: "" };
       return { ...s, turn: { ...base, chunks, text: textOf(chunks) } };
+    }
+    case "presence.update":
+      return { ...s, online: (p.online as string[]) ?? [] };
+    case "typing": {
+      const userId = p.user_id as string;
+      const ttl = Number(p.ttl_s ?? 4) * 1000;
+      return {
+        ...s,
+        typing: { ...s.typing, [userId]: { name: String(p.name ?? "Someone"), until: now + ttl } },
+      };
     }
     case "turn.delta": {
       const id = p.turn_id as string;
@@ -297,4 +328,19 @@ export function timeline(s: LiveState): TimelineItem[] {
 /** Messages waiting for the next turn (sent while the AI was busy, or requeued). */
 export function queuedCount(s: LiveState): number {
   return Object.values(s.messages).filter((m) => m.kind === "human" && m.status === "pending").length;
+}
+
+
+/** Names currently typing (excluding me), oldest first. */
+export function typingNames(s: LiveState, meId: string, now: number = Date.now()): string[] {
+  return Object.entries(s.typing)
+    .filter(([id, t]) => id !== meId && t.until > now)
+    .map(([, t]) => t.name);
+}
+
+export function typingLabel(names: string[]): string | null {
+  if (names.length === 0) return null;
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return `${names.length} people are typing…`;
 }

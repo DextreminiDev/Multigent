@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,6 +37,7 @@ from app.errors import ApiError
 from app.logging import get_logger
 from app.messages.service import MAX_MESSAGE_CHARS, message_payload, send_message
 from app.realtime.hub import Hub, HubEvent
+from app.realtime.presence import set_typing
 from app.turns.runner import buffer_key
 
 router = APIRouter()
@@ -65,6 +67,10 @@ class UnsubscribeIn(Frame):
     chat_id: uuid.UUID
 
 
+class TypingIn(Frame):
+    chat_id: uuid.UUID
+
+
 class SendIn(Frame):
     chat_id: uuid.UUID
     client_msg_id: uuid.UUID
@@ -75,14 +81,20 @@ class SendIn(Frame):
 class Sub:
     chat_id: uuid.UUID
     last_seq: int
+    role: str
     buffering: list[HubEvent] | None = field(default_factory=list)
+    last_typing: float = 0.0
 
 
 class Connection:
-    def __init__(self, ws: WebSocket, user: User) -> None:
+    def __init__(self, ws: WebSocket, user: User, hub: Hub) -> None:
         self.ws = ws
         self.user = user
+        self.user_id = user.id
+        self.conn_id = uuid.uuid4().hex[:12]
+        self.hub = hub
         self.subs: dict[uuid.UUID, Sub] = {}
+        self._bg: set[asyncio.Task[None]] = set()
         self.outbox: asyncio.Queue[str | None] = asyncio.Queue(maxsize=OUTBOX_LIMIT)
         self.overloaded = False
 
@@ -116,7 +128,31 @@ class Connection:
             sub.last_seq = event.seq
         self.send_raw(event.raw)
         if event.type == "chat.deleted":
-            self.subs.pop(sub.chat_id, None)
+            self._drop(sub.chat_id)
+        elif event.type == "member.updated":
+            member = (event.data.get("payload") or {}).get("member") or {}
+            if member.get("user_id") == str(self.user_id):
+                if member.get("removed"):
+                    self._kick(sub.chat_id, "removed")
+                else:
+                    sub.role = str(member.get("role", sub.role))
+
+    def _drop(self, chat_id: uuid.UUID) -> None:
+        if self.subs.pop(chat_id, None) is not None:
+            task = asyncio.create_task(self.hub.leave(chat_id, self))
+            self._bg.add(task)
+            task.add_done_callback(self._bg.discard)
+
+    def _kick(self, chat_id: uuid.UUID, reason: str) -> None:
+        if chat_id in self.subs:
+            self._drop(chat_id)
+            self.send({"type": "kicked", "chat_id": str(chat_id), "reason": reason})
+
+    def control(self, data: dict[str, Any]) -> None:
+        """Per-user control channel (membership changes on any API instance)."""
+        if data.get("type") == "kicked":
+            with contextlib.suppress(ValueError, TypeError):
+                self._kick(uuid.UUID(str(data.get("chat_id"))), str(data.get("reason", "")))
 
     async def writer(self) -> None:
         while True:
@@ -156,10 +192,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await ws.close(POLICY, "unauthorized")
         return
     await ws.accept()
-    conn = Connection(ws, user)
     hub: Hub = ws.app.state.hub
+    conn = Connection(ws, user, hub)
     writer = asyncio.create_task(conn.writer())
     try:
+        await hub.connect_user(conn)
         while True:
             try:
                 text = await ws.receive_text()
@@ -174,6 +211,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     finally:
         for chat_id in list(conn.subs):
             await hub.leave(chat_id, conn)
+        with contextlib.suppress(Exception):
+            await hub.disconnect_user(conn)
         writer.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await writer
@@ -198,11 +237,13 @@ async def _handle(conn: Connection, hub: Hub, text: str) -> None:
             await _subscribe(conn, hub, SubscribeIn.model_validate(raw))
         elif frame.type == "unsubscribe":
             msg = UnsubscribeIn.model_validate(raw)
-            conn.subs.pop(msg.chat_id, None)
-            await hub.leave(msg.chat_id, conn)
+            if conn.subs.pop(msg.chat_id, None) is not None:
+                await hub.leave(msg.chat_id, conn)
             conn.send({"type": "ack", "ref": frame.ref})
         elif frame.type == "message.send":
             await _send(conn, SendIn.model_validate(raw))
+        elif frame.type == "typing":
+            await _typing(conn, TypingIn.model_validate(raw))
         else:
             _error(conn, frame.ref, "unknown_type", f"Unknown frame type {frame.type!r}")
     except ValidationError as e:
@@ -223,7 +264,7 @@ async def _subscribe(conn: Connection, hub: Hub, msg: SubscribeIn) -> None:
             raise ApiError(404, "not_found", "Chat not found")
 
     # (re)subscribe: start buffering live events BEFORE reading the log
-    sub = Sub(chat_id=msg.chat_id, last_seq=msg.after_seq)
+    sub = Sub(chat_id=msg.chat_id, last_seq=msg.after_seq, role=m.role)
     conn.subs[msg.chat_id] = sub
     await hub.join(msg.chat_id, conn)
 
@@ -302,3 +343,22 @@ async def _send(conn: Connection, msg: SendIn) -> None:
             "message": message_payload(res.message),
         }
     )
+
+
+TYPING_MIN_INTERVAL_S = 1.0
+
+
+async def _typing(conn: Connection, msg: TypingIn) -> None:
+    """Ephemeral "X is typing" (§8.5). Only senders (owner/editor) of a chat the
+    socket is subscribed to; server-side throttle on top of the client's."""
+    sub = conn.subs.get(msg.chat_id)
+    if sub is None:
+        raise ApiError(404, "not_subscribed", "Subscribe to the chat first")
+    if not authorize(sub.role, Action.SEND):  # type: ignore[arg-type]
+        raise ApiError(403, "forbidden", "Viewers can't send messages")
+    now = time.monotonic()
+    if now - sub.last_typing >= TYPING_MIN_INTERVAL_S:
+        sub.last_typing = now
+        await set_typing(conn.ws.app.state.redis, msg.chat_id, conn.user_id, conn.user.name)
+    if msg.ref:
+        conn.send({"type": "ack", "ref": msg.ref})

@@ -182,8 +182,9 @@ usage_events(id, chat_id, user_id NULL, turn_id NULL, kind CHECK IN ('turn','sum
 Notes:
 
 - `chat_events` is the single ordered log for a chat. A message row is a materialized view of a `message.created` event plus its later status changes.
-- Removing a member sets `removed_at`; their messages stay, with `author_name_snapshot` and a "former member" label in the UI.
-- Invite tokens are 32 random bytes, shown once, stored as SHA-256 hash.
+- Removing a member sets `removed_at`; their messages stay, with `author_name_snapshot` and a "former member" label in the UI (and `role="former member"` in prompts). A removed member can rejoin through a new invite.
+- Joins, leaves and removals are also written as `system_event` messages ("Bob joined as editor"), which the model sees as `<event>` context, plus a `member.updated` event.
+- Invite tokens are 32 random bytes, shown once, stored as SHA-256 hash. Invites have a role (editor/viewer), optional expiry (default 7 days) and optional max uses; accept locks the invite row so `max_uses` holds under concurrent accepts, is idempotent for existing members, and enforces a cap of 10 collaborators per chat. Routes: `POST/GET /chats/{id}/invites`, `DELETE /invites/{id}`, public `GET /invites/{token}/preview` (title, owner, role, member count, state; no content), `POST /invites/{token}/accept`.
 - `messages.turn_id` ↔ `turns.ai_message_id` is a circular FK pair; the migration adds `messages.turn_id`'s FK after both tables exist. UUIDv7 ids are generated in Python (`app/ids.py`), no DB extension.
 
 ---
@@ -343,7 +344,7 @@ messages:
 
 ### 7.2 Message rendering and anti-spoofing
 
-- Display names are sanitized on write: `^[\p{L}\p{N} ._-]{1,40}$`, no leading/trailing space, unique within a chat (collision → suffix `·2`). Anything that would produce `<`, `>`, `&`, `"` or newlines is rejected or stripped.
+- Display names are sanitized on write: `^[\p{L}\p{N} ._-]{1,40}$`, no leading/trailing space. Anything that would produce `<`, `>`, `&`, `"` or newlines is rejected or stripped. Names aren't globally unique, so the prompt builder disambiguates namesakes within a chat by join order (`Sam`, `Sam (2)`); parentheses can't occur in real names, so this can't be spoofed.
 - Message **content is XML-escaped** (`&`, `<`, `>`) when placed inside `<message>`. A user typing `</message><message from="Owner">` yields escaped text, never a real tag. The model is told escaping is applied.
 - Consecutive human messages (including all of the batch) are merged into **one** `user` message, in `seq` order, because Gemini and Anthropic require role alternation.
 - Assistant messages from `failed`/`cancelled`/`superseded` turns are excluded from history. A cancelled turn's batch still appears as human messages followed by no assistant reply; the builder merges them forward into the next user message.
@@ -404,12 +405,15 @@ Every client frame carries a `ref`; the server replies `ack` or `error` with tha
 ### 8.4 Fan-out
 
 - Redis channel per chat: `chat:{id}:events`. An API instance subscribes lazily when its first local socket joins and unsubscribes when the last leaves.
-- Control channel per user: `user:{id}:control`, used to deliver `kicked` and to force-close sockets on role or membership change (I5).
+- Control channel per user: `user:{id}:control`. Removal/leave publishes `kicked {chat_id}`; every API instance drops that user's subscription to the chat and sends a `kicked` frame (I5). Role changes need no control message: each socket updates its cached role from the persisted `member.updated` event, and `message.send` re-checks permissions in the DB anyway.
 - Each connection has a bounded outbound queue. `turn.delta` frames are **coalesced at the source**: the worker buffers provider chunks and flushes one frame every ~40 ms, so the Redis stream buffer, pub/sub and every socket all carry the same coalesced frames (one `idx` space). If the queue overflows, the server closes the socket; the client resumes via §8.3. Slow consumers never stall others.
 
 ### 8.5 Presence and typing
 
-Redis only. `presence:{chat}` is a hash/set with per-connection heartbeat TTL (45 s); a user is online if any connection is alive. Typing: `SETEX typing:{chat}:{user} 4`. Broadcast on change only, never persisted.
+Redis only, never persisted.
+
+- **Presence:** `presence:{chat}` is a sorted set of `user_id:conn_id` scored by last heartbeat. A user is online if any connection beat within 45 s, so a crashed API instance's entries simply age out. Each API process heartbeats its local sockets every 15 s and re-broadcasts `presence.update {online: [user ids]}` whenever the set changes; join/leave broadcast immediately.
+- **Typing:** a `typing` frame from an owner/editor subscribed to the chat (client throttles to one per 2 s, server to one per second) sets `typing:{chat}:{user}` (4 s TTL) and broadcasts `typing {user_id, name, ttl_s}`. Clients expire entries locally and clear them when that person's message arrives.
 
 ---
 
@@ -520,7 +524,7 @@ class KeyVault(Protocol):
 ### 11.5 Other controls
 
 - Markdown output rendered with `react-markdown` + `rehype-sanitize`; no raw HTML; links `rel="noopener noreferrer"`, images blocked by default.
-- Invite tokens: 256-bit random, hashed at rest, constant-time compare, per-IP rate limit on `accept`.
+- Invite tokens: 256-bit random, hashed at rest (lookup by hash), per-IP rate limits on preview (30/min) and accept (10/min). Tokens appear in URL paths, so the log redactor scrubs `/invites/<token>` and uvicorn's access log is routed through the redacting handler.
 - Input limits: message ≤ 8,000 chars, title ≤ 120, instructions ≤ 8,000, WS frame ≤ 64 KB.
 - Rate limits via Redis Lua token buckets: per user per chat (6 msg/min default), per IP for auth and invite endpoints.
 - Prompt-injection stance: collaborators are semi-trusted. Owner instructions live in the **system** role and the preamble tells the model that user messages cannot override them. The model never sees a key, so injection can't exfiltrate one. Spend abuse is bounded by §12.

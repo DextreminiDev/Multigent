@@ -57,6 +57,7 @@ class Client:
         self.frames: list[dict[str, Any]] = []
         self.raw: list[str] = []
         self._n = 0
+        self._matched: set[int] = set()
 
     @property
     def id(self) -> str:
@@ -80,7 +81,13 @@ class Client:
     async def until(
         self, pred: Callable[[dict[str, Any]], bool], timeout: float = 5
     ) -> dict[str, Any]:
+        """Return the first not-yet-matched frame satisfying `pred`, including frames
+        that arrived earlier while waiting for something else (e.g. before an ack)."""
         assert self.ws is not None
+        for i, f in enumerate(self.frames):
+            if i not in self._matched and pred(f):
+                self._matched.add(i)
+                return f
         async with asyncio.timeout(timeout):
             while True:
                 raw = str(await self.ws.recv())
@@ -88,6 +95,7 @@ class Client:
                 frame = json.loads(raw)
                 self.frames.append(frame)
                 if pred(frame):
+                    self._matched.add(len(self.frames) - 1)
                     return frame  # type: ignore[no-any-return]
 
     async def ack(self, ref: str) -> dict[str, Any]:
@@ -189,6 +197,7 @@ async def test_subscribe_replays_from_after_seq(clients: Any, validator: StubVal
     assert replayed[0]["type"] == "chat.created"
 
     owner.frames.clear()
+    owner._matched.clear()
     ref = await owner.send("subscribe", chat_id=cid, after_seq=ack["seq"] - 1)
     await owner.ack(ref)
     assert [f["seq"] for f in owner.frames if f.get("replay")] == [ack["seq"]]
@@ -320,3 +329,109 @@ async def test_chat_deleted_is_pushed(clients: Any, validator: StubValidator) ->
     await owner.ack(await owner.send("subscribe", chat_id=cid, after_seq=0))
     assert (await owner.rest("DELETE", f"/chats/{cid}")).status_code == 204
     await owner.until(lambda f: f["type"] == "chat.deleted")
+
+
+# ------------------------------------------------------------------ collaboration (M4)
+
+
+async def join_via_invite(owner: Client, guest: Client, cid: str, role: str = "editor") -> None:
+    token = (await owner.rest("POST", f"/chats/{cid}/invites", json={"role": role})).json()["token"]
+    r = await guest.rest("POST", f"/invites/{token}/accept")
+    assert r.status_code == 200, r.text
+
+
+async def test_join_is_broadcast_live(clients: Any, validator: StubValidator) -> None:
+    owner, bob = await clients("Alice"), await clients("Bob")
+    cid = await ready(owner, validator)
+    await owner.connect()
+    await owner.ack(await owner.send("subscribe", chat_id=cid, after_seq=0))
+    await join_via_invite(owner, bob, cid)
+    sysmsg = await owner.until(
+        lambda f: (
+            f["type"] == "message.created" and f["payload"]["message"]["kind"] == "system_event"
+        )
+    )
+    assert sysmsg["payload"]["message"]["content"] == "Bob joined as editor"
+    upd = await owner.until(lambda f: f["type"] == "member.updated")
+    assert upd["payload"]["member"]["name"] == "Bob"
+    assert upd["payload"]["member"]["role"] == "editor"
+
+
+async def test_removed_member_is_kicked_from_live_socket(
+    clients: Any, validator: StubValidator
+) -> None:
+    owner, bob = await clients("Alice"), await clients("Bob")
+    cid = await ready(owner, validator)
+    await join_via_invite(owner, bob, cid)
+    await bob.connect()
+    await bob.ack(await bob.send("subscribe", chat_id=cid, after_seq=0))
+
+    assert (await owner.rest("DELETE", f"/chats/{cid}/members/{bob.id}")).status_code == 204
+    kicked = await bob.until(lambda f: f["type"] == "kicked")
+    assert kicked["chat_id"] == cid
+
+    # nothing more flows to Bob, and he can't come back in
+    await owner.rest("PATCH", f"/chats/{cid}", json={"title": "secret new title"})
+    ref = await bob.send("subscribe", chat_id=cid, after_seq=0)
+    err = await bob.until(lambda f: f.get("ref") == ref)
+    assert err["code"] == "not_found"
+    assert not any("secret new title" in r for r in bob.raw)
+    ref = await bob.send(
+        "message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), content="let me back"
+    )
+    assert (await bob.until(lambda f: f.get("ref") == ref))["code"] == "not_found"
+
+
+async def test_presence_tracks_connections(clients: Any, validator: StubValidator) -> None:
+    owner, bob = await clients("Alice"), await clients("Bob")
+    cid = await ready(owner, validator)
+    await join_via_invite(owner, bob, cid)
+    await owner.connect()
+    await owner.ack(await owner.send("subscribe", chat_id=cid, after_seq=0))
+    await owner.until(
+        lambda f: f["type"] == "presence.update" and f["payload"]["online"] == [owner.id]
+    )
+
+    await bob.connect()
+    await bob.ack(await bob.send("subscribe", chat_id=cid, after_seq=0))
+    both = await owner.until(
+        lambda f: f["type"] == "presence.update" and len(f["payload"]["online"]) == 2
+    )
+    assert set(both["payload"]["online"]) == {owner.id, bob.id}
+    members = (await owner.rest("GET", f"/chats/{cid}/members")).json()
+    assert all(m["online"] for m in members)
+
+    assert bob.ws is not None
+    await bob.ws.close()
+    after = await owner.until(
+        lambda f: f["type"] == "presence.update" and f["payload"]["online"] == [owner.id]
+    )
+    assert after["payload"]["online"] == [owner.id]
+
+
+async def test_typing_indicator_and_permissions(clients: Any, validator: StubValidator) -> None:
+    owner, bob, vi = await clients("Alice"), await clients("Bob"), await clients("Vi")
+    cid = await ready(owner, validator)
+    await join_via_invite(owner, bob, cid, "editor")
+    await join_via_invite(owner, vi, cid, "viewer")
+    for c in (owner, bob, vi):
+        await c.connect()
+
+    ref = await bob.send("typing", chat_id=cid)  # not subscribed yet
+    assert (await bob.until(lambda f: f.get("ref") == ref))["code"] == "not_subscribed"
+    for c in (owner, bob, vi):
+        await c.ack(await c.send("subscribe", chat_id=cid, after_seq=0))
+
+    await bob.ack(await bob.send("typing", chat_id=cid))
+    t = await owner.until(lambda f: f["type"] == "typing")
+    assert t["payload"]["user_id"] == bob.id
+    assert t["payload"]["name"] == "Bob"
+
+    ref = await vi.send("typing", chat_id=cid)
+    assert (await vi.until(lambda f: f.get("ref") == ref))["code"] == "forbidden"
+
+    # demote Bob live: his socket learns the new role from member.updated
+    await owner.rest("PATCH", f"/chats/{cid}/members/{bob.id}", json={"role": "viewer"})
+    await bob.until(lambda f: f["type"] == "member.updated")
+    ref = await bob.send("typing", chat_id=cid)
+    assert (await bob.until(lambda f: f.get("ref") == ref))["code"] == "forbidden"

@@ -1,27 +1,61 @@
 "use client";
 
-import { PanelRight, Users } from "lucide-react";
+import { PanelRight, UserPlus, Users } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, type Chat } from "@/lib/api/client";
-import { useChat, useMe } from "@/lib/api/hooks";
+import { useChat, useMe, useMembers } from "@/lib/api/hooks";
 import { cn } from "@/lib/utils";
-import { SettingsPanel } from "./settings-panel";
 import { Conversation } from "./conversation";
+import { InviteDialog } from "./invite-dialog";
+import { Participants, PresenceStack } from "./participants";
+import { SettingsPanel } from "./settings-panel";
+import { useLiveChat } from "./use-live-chat";
 
 function PanelHeading({ chat }: { chat: Chat }) {
   return <>{chat.role === "owner" ? "Chat settings" : "About this chat"}</>;
 }
 
+function Panel({
+  chat,
+  meId,
+  online,
+  onInvite,
+}: {
+  chat: Chat;
+  meId: string;
+  online: string[] | null;
+  onInvite: () => void;
+}) {
+  return (
+    <div className="space-y-6">
+      <Participants chat={chat} meId={meId} online={online} onInvite={onInvite} />
+      <Separator />
+      <SettingsPanel chat={chat} />
+    </div>
+  );
+}
+
 export function ChatScreen({ chatId }: { chatId: string }) {
   const chat = useChat(chatId);
   const me = useMe();
+  const live = useLiveChat(chatId);
+  const members = useMembers(chatId);
   const [panelOpen, setPanelOpen] = useState(true); // desktop
   const [sheetOpen, setSheetOpen] = useState(false); // mobile
+  const [inviteOpen, setInviteOpen] = useState(false);
+
+  const memberIds = useMemo(
+    () => (members.data ? new Set(members.data.map((m) => m.user_id)) : null),
+    [members.data],
+  );
+  // live presence once the socket has reported it, else the REST snapshot
+  const online = live.state && live.state.online.length > 0 ? live.state.online : null;
 
   if (chat.isPending) {
     return (
@@ -51,6 +85,8 @@ export function ChatScreen({ chatId }: { chatId: string }) {
   }
 
   const c = chat.data;
+  const meId = me.data?.user.id ?? "";
+  const openInvite = () => setInviteOpen(true);
 
   return (
     <div className="flex h-full min-h-0">
@@ -62,13 +98,21 @@ export function ChatScreen({ chatId }: { chatId: string }) {
               {c.role}
             </Badge>
           )}
-          <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
-            <Users className="size-3.5" aria-hidden />
-            <span>
-              {c.member_count}
-              <span className="sr-only"> members</span>
+          <div className="ml-auto flex items-center gap-2">
+            {live.state && <PresenceStack chatId={c.id} online={live.state.online} />}
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Users className="size-3.5" aria-hidden />
+              <span>
+                {members.data?.length ?? c.member_count}
+                <span className="sr-only"> members</span>
+              </span>
             </span>
-          </span>
+            {c.role === "owner" && (
+              <Button variant="ghost" size="icon" aria-label="Invite people" onClick={openInvite}>
+                <UserPlus />
+              </Button>
+            )}
+          </div>
           <Button
             variant="ghost"
             size="icon"
@@ -83,38 +127,56 @@ export function ChatScreen({ chatId }: { chatId: string }) {
             variant="ghost"
             size="icon"
             className="lg:hidden"
-            aria-label="Open chat settings"
+            aria-label="Open people and settings"
             onClick={() => setSheetOpen(true)}
           >
             <PanelRight />
           </Button>
         </header>
         <main className="min-h-0 flex-1">
-          {me.data ? <Conversation chat={c} meId={me.data.user.id} /> : null}
+          {me.data ? (
+            <Conversation
+              chat={c}
+              meId={meId}
+              live={live}
+              memberIds={memberIds}
+              onInvite={openInvite}
+            />
+          ) : null}
         </main>
       </div>
 
       <aside
         aria-label="Chat details"
-        className={cn(
-          "hidden w-88 shrink-0 overflow-y-auto border-l p-5",
-          panelOpen && "lg:block",
-        )}
+        className={cn("hidden w-88 shrink-0 overflow-y-auto border-l p-5", panelOpen && "lg:block")}
       >
         <h2 className="mb-5 font-medium">
           <PanelHeading chat={c} />
         </h2>
-        <SettingsPanel chat={c} />
+        <Panel chat={c} meId={meId} online={online} onInvite={openInvite} />
       </aside>
 
+      {/* mobile: bottom sheet (people often join from invite links on phones) */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
-        <SheetContent side="right" className="w-[92vw] max-w-md overflow-y-auto p-5">
+        <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto rounded-t-2xl p-5">
           <SheetTitle>
             <PanelHeading chat={c} />
           </SheetTitle>
-          <SettingsPanel chat={c} />
+          <Panel
+            chat={c}
+            meId={meId}
+            online={online}
+            onInvite={() => {
+              setSheetOpen(false);
+              openInvite();
+            }}
+          />
         </SheetContent>
       </Sheet>
+
+      {c.role === "owner" && (
+        <InviteDialog chatId={c.id} open={inviteOpen} onOpenChange={setInviteOpen} />
+      )}
     </div>
   );
 }

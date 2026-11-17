@@ -197,6 +197,11 @@ export class WsClient {
     if (sub) this.sendSubscribe(sub);
   }
 
+  /** Fire-and-forget "I'm typing" (dropped while disconnected; it's ephemeral). */
+  typing(chatId: string) {
+    this.transmit({ type: "typing", chat_id: chatId });
+  }
+
   /** Send a message; survives reconnects until the server acks it. */
   sendMessage(chatId: string, clientMsgId: string, content: string): Promise<Ack> {
     return new Promise<Ack>((resolve, reject) => {

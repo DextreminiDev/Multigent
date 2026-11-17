@@ -1,6 +1,7 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, UserPlus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { Chat } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 import { KeySetup, ModelPicker } from "./key-setup";
@@ -13,7 +14,7 @@ export function setupSteps(chat: Chat): SetupStep[] {
     { id: "key", label: "Add your API key", done: hasKey },
     { id: "verified", label: "Key verified", done: chat.key?.status === "ok" },
     { id: "model", label: "Pick a model", done: !!chat.model },
-    { id: "invite", label: "Invite people", done: false, disabled: true },
+    { id: "invite", label: "Invite people", done: chat.member_count > 1 },
   ];
 }
 
@@ -22,7 +23,7 @@ export function isChatReady(chat: Chat): boolean {
   return !!chat.key && chat.key.status !== "invalid" && !!chat.model;
 }
 
-export function SetupChecklist({ chat }: { chat: Chat }) {
+export function SetupChecklist({ chat, onInvite }: { chat: Chat; onInvite?: () => void }) {
   const steps = setupSteps(chat);
   const needKey = !chat.key || chat.key.status === "invalid";
   return (
@@ -72,9 +73,16 @@ export function SetupChecklist({ chat }: { chat: Chat }) {
           </div>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">
-        Inviting collaborators arrives in the next update.
-      </p>
+      {onInvite && (
+        <div className="flex items-center justify-between gap-3 border-t pt-4">
+          <p className="text-xs text-muted-foreground">
+            Invite people any time; they can chat as soon as the key and model are set.
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={onInvite}>
+            <UserPlus /> Invite
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

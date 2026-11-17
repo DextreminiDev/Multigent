@@ -309,6 +309,7 @@ class TurnRunner:
                         select(User, ChatMember.role)
                         .join(ChatMember, ChatMember.user_id == User.id)
                         .where(ChatMember.chat_id == chat_id, ChatMember.removed_at.is_(None))
+                        .order_by(ChatMember.joined_at)  # stable namesake labels
                     )
                 ).all()
             ]

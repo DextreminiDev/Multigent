@@ -168,3 +168,102 @@ export function useDeleteKey(id: string) {
 export function useValidateKey(id: string) {
   return useKeyMutation(id, () => unwrap(api.POST("/chats/{chat_id}/key/validate", path(id))));
 }
+
+// ------------------------------------------------------------------ members & invites
+
+export type Member = Schemas["MemberView"];
+export type Invite = Schemas["InviteView"];
+export type InviteInput = Schemas["InviteCreate"];
+
+export const qkm = {
+  members: (id: string) => ["chats", id, "members"] as const,
+  invites: (id: string) => ["chats", id, "invites"] as const,
+  invitePreview: (token: string) => ["invite", token] as const,
+};
+
+export function useMembers(chatId: string) {
+  return useQuery({
+    queryKey: qkm.members(chatId),
+    queryFn: () => unwrap(api.GET("/chats/{chat_id}/members", path(chatId))),
+  });
+}
+
+export function useInvites(chatId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qkm.invites(chatId),
+    queryFn: () => unwrap(api.GET("/chats/{chat_id}/invites", path(chatId))),
+    enabled,
+  });
+}
+
+export function useCreateInvite(chatId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: InviteInput) =>
+      unwrap(api.POST("/chats/{chat_id}/invites", { ...path(chatId), body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qkm.invites(chatId) }),
+  });
+}
+
+export function useRevokeInvite(chatId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) =>
+      unwrap(api.DELETE("/invites/{invite_id}", { params: { path: { invite_id: inviteId } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qkm.invites(chatId) }),
+  });
+}
+
+function useMemberWriter(chatId: string) {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: qkm.members(chatId) });
+    qc.invalidateQueries({ queryKey: qk.chat(chatId) });
+    qc.invalidateQueries({ queryKey: qk.chats, exact: true });
+  };
+}
+
+export function useChangeRole(chatId: string) {
+  const done = useMemberWriter(chatId);
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: "editor" | "viewer" }) =>
+      unwrap(
+        api.PATCH("/chats/{chat_id}/members/{user_id}", {
+          params: { path: { chat_id: chatId, user_id: userId } },
+          body: { role },
+        }),
+      ),
+    onSettled: done,
+  });
+}
+
+export function useRemoveMember(chatId: string) {
+  const done = useMemberWriter(chatId);
+  return useMutation({
+    mutationFn: (userId: string) =>
+      unwrap(
+        api.DELETE("/chats/{chat_id}/members/{user_id}", {
+          params: { path: { chat_id: chatId, user_id: userId } },
+        }),
+      ),
+    onSettled: done,
+  });
+}
+
+export function useInvitePreview(token: string) {
+  return useQuery({
+    queryKey: qkm.invitePreview(token),
+    queryFn: () =>
+      unwrap(api.GET("/invites/{token}/preview", { params: { path: { token } } })),
+    retry: false,
+  });
+}
+
+export function useAcceptInvite() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) =>
+      unwrap(api.POST("/invites/{token}/accept", { params: { path: { token } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.chats, exact: true }),
+  });
+}

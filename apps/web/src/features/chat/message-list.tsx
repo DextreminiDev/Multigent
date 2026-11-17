@@ -57,10 +57,12 @@ function HumanMessage({
   m,
   mine,
   queued,
+  former,
 }: {
   m: ChatMessage;
   mine: boolean;
   queued: "next" | "waiting" | null;
+  former: boolean;
 }) {
   return (
     <article
@@ -72,7 +74,7 @@ function HumanMessage({
         <div className="mb-0.5 flex items-baseline gap-2 text-xs text-muted-foreground">
           <span className="font-medium text-foreground/90">{mine ? "You" : m.author_name}</span>
           <time dateTime={m.created_at}>{time(m.created_at)}</time>
-          {!m.author_id && <span>(former member)</span>}
+          {former && <span>(former member)</span>}
         </div>
         <div
           className={cn(
@@ -178,6 +180,7 @@ export function MessageList({
   paused,
   onRetrySend,
   onDiscardSend,
+  memberIds = null,
   header,
   empty,
 }: {
@@ -187,6 +190,8 @@ export function MessageList({
   paused: boolean;
   onRetrySend: (id: string) => void;
   onDiscardSend: (id: string) => void;
+  /** current member ids (null while loading): others are "former members" */
+  memberIds?: Set<string> | null;
   header?: React.ReactNode;
   empty: React.ReactNode;
 }) {
@@ -274,7 +279,17 @@ export function MessageList({
                 }
                 const queued =
                   m.status === "pending" ? (turnRunning && !paused ? "next" : "waiting") : null;
-                return <HumanMessage key={it.key} m={m} mine={m.author_id === meId} queued={queued} />;
+                const former =
+                  !m.author_id || (memberIds !== null && !memberIds.has(m.author_id));
+                return (
+                  <HumanMessage
+                    key={it.key}
+                    m={m}
+                    mine={m.author_id === meId}
+                    queued={queued}
+                    former={former}
+                  />
+                );
               }
               case "streaming":
                 return <StreamingMessage key={it.key} turn={it.turn} names={streamingNames} />;
