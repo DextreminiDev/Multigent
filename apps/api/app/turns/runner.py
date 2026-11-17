@@ -555,7 +555,9 @@ class TurnRunner:
                     "error_code": code,
                     "error_message": FRIENDLY.get(code, FRIENDLY["unknown"]),
                     # provider's own explanation, already redacted (useful to the owner)
-                    "detail": err.message[:500] if code in ("model", "unknown") else None,
+                    "detail": err.message[:500]
+                    if code in ("model", "unknown", "unavailable", "rate_limit", "quota")
+                    else None,
                     "message_ids": [str(i) for i in ids],
                     "requeued": requeue,
                     "partial_text": result.text or None,

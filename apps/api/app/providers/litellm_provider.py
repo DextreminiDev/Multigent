@@ -8,6 +8,7 @@ blocks to ContentBlocked.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 
@@ -56,6 +57,8 @@ litellm.failure_callback = []
 
 DEFAULT_CONTEXT_WINDOW = 32_000
 REQUEST_TIMEOUT_S = 120
+FIRST_CHUNK_TIMEOUT_S = 90.0  # max wait for the first token (thinking models start slowly)
+IDLE_TIMEOUT_S = 45.0  # max gap between chunks once streaming
 
 _PREFIX = {
     "gemini": "gemini/",
@@ -131,7 +134,8 @@ def map_exception(e: Exception, api_key: str) -> ProviderError:
         | lx.BadGatewayError
         | lx.Timeout,
     ):
-        return ProviderUnavailable("The provider is unavailable right now", secret=api_key)
+        detail = provider_message(msg) or "The provider is unavailable right now"
+        return ProviderUnavailable(detail, secret=api_key)
     if isinstance(e, lx.BadRequestError):
         detail = provider_message(msg) or msg[:300]
         return Unknown(f"The provider rejected the request: {detail}", secret=api_key)
@@ -179,8 +183,21 @@ class LiteLLMProvider:
         finish: FinishReason | None = None
         usage: Usage | None = None
         try:
-            stream = await litellm.acompletion(**kwargs)
-            async for chunk in stream:
+            stream = await asyncio.wait_for(litellm.acompletion(**kwargs), FIRST_CHUNK_TIMEOUT_S)
+            it = stream.__aiter__()
+            while True:
+                # Stall guard: overloaded providers sometimes open the stream and then
+                # send nothing. Fail fast instead of waiting for the full HTTP timeout.
+                # (Thinking models can be slow to start, so the first chunk gets longer.)
+                wait = IDLE_TIMEOUT_S if emitted else FIRST_CHUNK_TIMEOUT_S
+                try:
+                    chunk = await asyncio.wait_for(it.__anext__(), wait)
+                except StopAsyncIteration:
+                    break
+                except TimeoutError:
+                    raise ProviderUnavailable(
+                        f"The provider stopped responding (no data for {int(wait)}s)"
+                    ) from None
                 u = getattr(chunk, "usage", None)
                 if u is not None and getattr(u, "prompt_tokens", None) is not None:
                     usage = Usage(int(u.prompt_tokens or 0), int(u.completion_tokens or 0))

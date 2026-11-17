@@ -225,3 +225,30 @@ async def test_midstream_fallback_unwraps_original(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(litellm, "acompletion", fake_acompletion([], [], raise_at=-1, exc=outer))
     with pytest.raises(ProviderUnavailable):
         await collect(lp.LiteLLMProvider())
+
+
+@pytest.mark.parametrize("hang_after", [0, 1])
+async def test_stalled_stream_fails_fast(monkeypatch: pytest.MonkeyPatch, hang_after: int) -> None:
+    import asyncio
+
+    async def acompletion(**kw: Any) -> AsyncIterator[Any]:
+        async def gen() -> AsyncIterator[Any]:
+            if hang_after:
+                yield chunk("partial")
+            await asyncio.Event().wait()  # provider opens the stream and goes silent
+            yield chunk("never")
+
+        return gen()
+
+    monkeypatch.setattr(litellm, "acompletion", acompletion)
+    monkeypatch.setattr(lp, "FIRST_CHUNK_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(lp, "IDLE_TIMEOUT_S", 0.2)
+    got: list[Any] = []
+
+    async def consume() -> None:
+        async for c in lp.LiteLLMProvider().stream_chat(REQ, KEY):
+            got.append(c)
+
+    with pytest.raises(ProviderUnavailable, match="stopped responding"):
+        await asyncio.wait_for(consume(), 5)
+    assert got == ([TextDelta("partial")] if hang_after else [])
