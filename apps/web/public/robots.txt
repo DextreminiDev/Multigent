@@ -1,0 +1,4 @@
+User-agent: *
+# Invite links and chats are private; nothing here should be indexed.
+Disallow: /invite/
+Disallow: /c/
