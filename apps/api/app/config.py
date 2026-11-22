@@ -19,8 +19,8 @@ class Settings(BaseSettings):
 
     env: Literal["development", "test", "production"] = "development"
 
-    database_url: str = "postgresql+asyncpg://multigent:multigent@localhost:55432/multigent"
-    redis_url: str = "redis://localhost:56379/0"
+    database_url: str = "postgresql+asyncpg://multigent:multigent@localhost:15432/multigent"
+    redis_url: str = "redis://localhost:16379/0"
 
     # KeyVault master keys: JSON object {key_id: base64(32 bytes)}.
     key_encryption_keys: str = Field(default="{}", repr=False)

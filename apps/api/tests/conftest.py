@@ -33,9 +33,9 @@ API_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
-    "postgresql+asyncpg://multigent:multigent@localhost:55432/multigent_test",
+    "postgresql+asyncpg://multigent:multigent@localhost:15432/multigent_test",
 )
-TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:56379/15")
+TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:16379/15")
 TEST_MASTER_KEYS = {
     "k1": base64.b64encode(b"\x01" * 32).decode(),
     "k2": base64.b64encode(b"\x02" * 32).decode(),
