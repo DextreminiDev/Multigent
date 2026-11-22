@@ -76,7 +76,8 @@ describe("KeySetup", () => {
         chat={chat({ key: { provider: "gemini", status: "ok", last4: "9xYz", validated_at: null } })}
       />,
     );
-    expect(screen.getByText("•••• 9xYz")).toBeInTheDocument();
+    expect(screen.getByText("9xYz")).toBeInTheDocument();
+    expect(screen.getByText("Key ending in")).toHaveClass("sr-only");
     expect(screen.getByText("Verified")).toBeInTheDocument();
     expect(screen.queryByLabelText("API key")).toBeNull();
   });

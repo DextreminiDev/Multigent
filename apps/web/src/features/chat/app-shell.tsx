@@ -34,7 +34,9 @@ export function AppShell({ me, children }: { me: Me; children: React.ReactNode }
           </Button>
           <Logo />
         </div>
-        <div className="min-h-0 flex-1">{children}</div>
+        <div id="main" tabIndex={-1} className="min-h-0 flex-1 outline-none">
+          {children}
+        </div>
       </div>
     </div>
   );

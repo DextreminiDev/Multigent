@@ -318,3 +318,49 @@ def test_namesakes_are_disambiguated_and_former_members_labelled() -> None:
     assert 'from="sam (2)" role="editor"' in out
     assert 'from="Sam" role="former member"' in out
     assert "- sam (2) (can send messages)" in render_roster(people)
+
+
+# ------------------------------------------------------------------ account deletion
+
+
+async def test_delete_account(
+    login: LoginFn, validator: StubValidator, sessionmaker: SM, client: AsyncClient
+) -> None:
+    from app.db.models import AuthIdentity, Chat, ChatKey
+
+    alice, bob = await login("Alice"), await login("Bob")
+    alices_chat = await ready_chat(alice, validator)
+    bobs_chat = await ready_chat(bob, validator, key="bobs-key-12345")
+    await accept(alice, (await invite(bob, bobs_chat, role="editor"))["token"])
+    body = {"client_msg_id": str(uuid.uuid4()), "content": "hello from alice"}
+    assert (await alice.post(f"/chats/{bobs_chat}/messages", json=body)).status_code == 201
+    await accept(bob, (await invite(alice, alices_chat))["token"])
+
+    assert (await alice.http.delete("/me")).status_code == 403  # needs CSRF
+    r = await alice.delete("/me")
+    assert r.status_code == 204
+    assert (await alice.get("/me")).status_code == 401  # all sessions gone
+
+    async with sessionmaker() as s:
+        # her own chat and its key are gone
+        assert await s.get(Chat, uuid.UUID(alices_chat)) is None
+        assert await s.get(ChatKey, uuid.UUID(alices_chat)) is None
+        # she left Bob's chat; her message stays, attributed by name snapshot
+        m = await s.get(ChatMember, (uuid.UUID(bobs_chat), uuid.UUID(alice.id)))
+        assert m is not None and m.removed_at is not None
+        user = await s.get(User, uuid.UUID(alice.id))
+        assert user is not None and user.deleted_at is not None
+        assert "alice" not in user.email and user.name == "Deleted user"
+        assert (
+            await s.scalars(select(AuthIdentity).where(AuthIdentity.user_id == uuid.UUID(alice.id)))
+        ).all() == []
+    msgs = (await bob.get(f"/chats/{bobs_chat}/messages")).json()
+    assert any(x["content"] == "hello from alice" and x["author_name"] == "Alice" for x in msgs)
+    assert any(x["content"] == "Alice left the chat" for x in msgs)
+    assert [c["id"] for c in (await bob.get("/chats")).json()] == [bobs_chat]
+    # the email can be used for a brand-new account
+    fresh = await client.post(
+        "/auth/dev/login", json={"email": "alice@example.com", "name": "Alice"}
+    )
+    assert fresh.status_code == 200
+    assert fresh.json()["user"]["id"] != alice.id

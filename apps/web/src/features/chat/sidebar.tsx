@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, Moon, Plus, Sun } from "lucide-react";
+import { LogOut, Moon, Plus, Sun, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Chat, Me } from "@/lib/api/client";
-import { useChats, useCreateChat, useLogout } from "@/lib/api/hooks";
+import { useChats, useCreateChat, useDeleteAccount, useLogout } from "@/lib/api/hooks";
 import { cn } from "@/lib/utils";
 
 function ChatLink({
@@ -55,6 +55,7 @@ function ChatLink({
         <span
           className="size-1.5 rounded-full bg-warn"
           title="Needs an API key"
+          role="img"
           aria-label="Needs an API key"
         />
       )}
@@ -90,6 +91,7 @@ export function Sidebar({ me, onNavigate }: { me: Me; onNavigate?: () => void })
   const chats = useChats();
   const create = useCreateChat();
   const logout = useLogout();
+  const deleteAccount = useDeleteAccount();
   const router = useRouter();
   const { chatId } = useParams<{ chatId?: string }>();
   const { resolvedTheme, setTheme } = useTheme();
@@ -163,6 +165,27 @@ export function Sidebar({ me, onNavigate }: { me: Me; onNavigate?: () => void })
             onClick={() => logout.mutate(undefined, { onSettled: () => router.replace("/login") })}
           >
             <LogOut /> Sign out
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => {
+              const typed = window.prompt(
+                "This permanently deletes your account and every chat you own " +
+                  "(including their API keys and messages). You will leave chats owned " +
+                  "by others. This can't be undone.\n\nType DELETE to confirm.",
+              );
+              if (typed !== "DELETE") return;
+              deleteAccount.mutate(undefined, {
+                onSuccess: () => {
+                  toast("Your account was deleted");
+                  router.replace("/login");
+                },
+                onError: (e) => toast.error(e.message),
+              });
+            }}
+          >
+            <Trash2 /> Delete account…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

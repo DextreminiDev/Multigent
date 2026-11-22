@@ -87,6 +87,7 @@ function HumanMessage({
   return (
     <article
       aria-label={`${m.author_name ?? "Someone"} said`}
+      data-msg-id={m.id}
       className={cn("flex gap-3 py-2", mine && "flex-row-reverse")}
     >
       <Avatar name={m.author_name ?? "?"} color={m.author_color ?? "#777"} className="mt-0.5 size-7" />

@@ -65,8 +65,10 @@ export function KeySetup({ chat, compact = false }: { chat: Chat; compact?: bool
         <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3">
           <KeyRound className="size-4 text-muted-foreground" aria-hidden />
           <span className="text-sm font-medium">{label ?? chat.key.provider}</span>
-          <span className="font-mono text-sm text-muted-foreground" aria-label="Key ending in">
-            •••• {chat.key.last4}
+          <span className="font-mono text-sm text-muted-foreground">
+            <span className="sr-only">Key ending in </span>
+            <span aria-hidden>•••• </span>
+            {chat.key.last4}
           </span>
           <Badge className={cn("ml-auto", s.className)}>{s.label}</Badge>
         </div>

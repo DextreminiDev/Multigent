@@ -25,6 +25,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       className={`${instrument.variable} ${jetbrains.variable}`}
     >
       <body>
+        <a
+          href="#main"
+          className="sr-only z-50 rounded-md bg-primary px-3 py-2 text-primary-foreground focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+        >
+          Skip to content
+        </a>
         <Providers>{children}</Providers>
       </body>
     </html>

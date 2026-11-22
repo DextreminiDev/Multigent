@@ -6,10 +6,12 @@ from __future__ import annotations
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.auth.oauth import router as oauth_router
 from app.auth.routes import router as auth_router
 from app.auth.sessions import SessionStore
 from app.chats.routes import router as chats_router
@@ -28,6 +30,7 @@ from app.redis_client import make_redis
 from app.security.keyvault import KeyVault, LocalKeyVault
 from app.turns.routes import router as turns_router
 from app.usage.routes import router as usage_router
+from app.users.routes import router as users_router
 
 log = get_logger("api")
 
@@ -72,6 +75,9 @@ def create_app(
             yield
         finally:
             await hub.stop()
+            oauth_http = getattr(app.state, "oauth_http", None)
+            if oauth_http is not None:
+                await oauth_http.aclose()
             if owned_validator is not None:
                 await owned_validator.aclose()
             await redis.aclose()
@@ -92,14 +98,28 @@ def create_app(
         allow_headers=["Content-Type", "X-CSRF-Token"],
     )
     install_error_handlers(app)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next: Any) -> Any:
+        response = await call_next(request)
+        h = response.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "no-referrer")
+        # JSON from this API is per-user (sessions, chats): never cache it in shared caches
+        h.setdefault("Cache-Control", "no-store")
+        return response
+
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(oauth_router)
     app.include_router(chats_router)
     app.include_router(messages_router)
     app.include_router(members_router)
     app.include_router(invites_router)
     app.include_router(turns_router)
     app.include_router(usage_router)
+    app.include_router(users_router)
     app.include_router(ws_router)
     return app
 

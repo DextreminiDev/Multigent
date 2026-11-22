@@ -376,3 +376,23 @@ export function useSetMemberCap(chatId: string) {
     },
   });
 }
+
+export function useAuthProviders() {
+  return useQuery({
+    queryKey: ["auth-providers"],
+    queryFn: () => unwrap(api.GET("/auth/providers")),
+    staleTime: Infinity,
+  });
+}
+
+export function useDeleteAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(api.DELETE("/me")),
+    onSuccess: () => {
+      setCsrfToken(null);
+      qc.clear();
+      qc.setQueryData(qk.me, null);
+    },
+  });
+}

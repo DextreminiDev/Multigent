@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     shutdown_grace_s: int = 30
 
     dev_login: bool = False
+
+    # OAuth (ARCHITECTURE.md §11.1). A provider is enabled when both values are set.
+    public_api_url: str = "http://localhost:8000"  # builds the OAuth redirect_uri
+    web_url: str = "http://localhost:3000"  # where users land after signing in
+    oauth_google_client_id: str = ""
+    oauth_google_client_secret: str = Field(default="", repr=False)
+    oauth_github_client_id: str = ""
+    oauth_github_client_secret: str = Field(default="", repr=False)
     log_level: str = "INFO"
 
     @field_validator("allowed_origins", mode="before")

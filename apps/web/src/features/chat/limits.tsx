@@ -221,7 +221,7 @@ export function UsageBreakdown({ u, chatId }: { u: UsageView; chatId: string }) 
 
       <div>
         <div className="mb-1 text-xs text-muted-foreground">Last 7 days</div>
-        <div className="flex h-16 items-end gap-1" aria-label="Tokens per day, last 7 days">
+        <div className="flex h-16 items-end gap-1" role="img" aria-label="Tokens per day, last 7 days">
           {u.days.map((d) => {
             const total = d.tokens_in + d.tokens_out;
             return (

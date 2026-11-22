@@ -13,10 +13,12 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select
 
 from app.auth.sessions import SESSION_COOKIE, csrf_token
+from app.config import Settings
 from app.db.models import AuthIdentity, User
 from app.deps import AuthDep, CsrfAuthDep, DbDep, SessionsDep, SettingsDep, check_origin
 from app.errors import ApiError
 from app.ids import uuid7
+from app.security.ratelimit import limit_ip
 from app.users.names import avatar_color, sanitize_display_name
 
 router = APIRouter(tags=["auth"])
@@ -48,7 +50,7 @@ def user_view(u: User) -> UserView:
     return UserView(id=u.id, email=u.email, name=u.name, avatar_color=u.avatar_color)
 
 
-def _set_session_cookie(response: Response, sid: str, settings: SettingsDep) -> None:
+def set_session_cookie(response: Response, sid: str, settings: Settings) -> None:
     response.set_cookie(
         SESSION_COOKIE,
         sid,
@@ -73,6 +75,7 @@ async def dev_login(
     if not settings.dev_login:
         raise ApiError(404, "not_found", "Not found")
     check_origin(request, settings)
+    await limit_ip(request, request.app.state.redis, "dev_login", limit=30, window_s=60)
     email = body.email.lower()
     user = await db.scalar(select(User).where(User.email == email))
     if user is None:
@@ -85,7 +88,7 @@ async def dev_login(
     elif user.deleted_at is not None:
         raise ApiError(403, "account_deleted", "This account was deleted")
     sid = await sessions.create(user.id)
-    _set_session_cookie(response, sid, settings)
+    set_session_cookie(response, sid, settings)
     return MeView(
         user=user_view(user), csrf_token=csrf_token(request.app.state.session_secret, sid)
     )

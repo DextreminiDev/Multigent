@@ -621,6 +621,8 @@ Additional layers:
 13. **Model limits are stored per chat** when the model is chosen (provider list first), rather than looked up per call.
 14. **503 "high demand" gets the same backoff as 429**, plus a stall guard for streams that open and go silent (seen live with free Gemini keys).
 15. **Per-member caps are enforced at send time** (clearer than pausing the whole chat for one member), and turn usage is split evenly across the batch's authors.
+16. **OAuth uses userinfo/REST profile calls** (not ID-token verification): Google with PKCE, a browser-bound single-use `state`, verified emails only, accounts linked by verified email.
+17. **Account deletion** (`DELETE /me`) is implemented: owned chats hard-deleted, other memberships left (messages kept under the sender's name snapshot), profile scrubbed, identities and sessions removed. See SECURITY.md "Data retention".
 
 ---
 
@@ -629,5 +631,5 @@ Additional layers:
 - ~~UUIDv7 library choice vs. `uuid_generate_v7()` extension.~~ Decided: in-process generator (`app/ids.py`).
 - Whether the owner can allow collaborators to "bring their own key" later (explicitly out of scope for v1).
 - Per-owner timezone for daily caps.
-- Data retention: default is keep messages until the chat is deleted; deleting a chat hard-deletes everything including the key within one transaction.
+- ~~Data retention~~ Decided: messages are kept until the chat is deleted; deleting a chat hard-deletes everything including the key in one transaction; account deletion is described in SECURITY.md.
 - Whether viewers should be able to see queued-but-unanswered messages from editors (default: yes).

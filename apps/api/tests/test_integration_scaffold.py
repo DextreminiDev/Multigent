@@ -164,3 +164,22 @@ async def test_worker_heartbeat_and_clean_stop(settings: Settings, redis: Redis)
     w.stop()
     await asyncio.wait_for(task, 2)
     assert await redis.zscore(HEARTBEAT_INDEX, w.worker_id) is None
+
+
+async def test_security_headers(client: AsyncClient) -> None:
+    r = await client.get("/healthz")
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["x-frame-options"] == "DENY"
+    assert r.headers["referrer-policy"] == "no-referrer"
+    assert r.headers["cache-control"] == "no-store"
+
+
+async def test_dev_login_is_rate_limited(client: AsyncClient) -> None:
+    codes = [
+        (
+            await client.post("/auth/dev/login", json={"email": f"u{i}@example.com", "name": "U"})
+        ).status_code
+        for i in range(31)
+    ]
+    assert codes[:30] == [200] * 30
+    assert codes[30] == 429

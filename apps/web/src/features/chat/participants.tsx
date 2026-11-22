@@ -16,6 +16,7 @@ function OnlineDot({ online }: { online: boolean }) {
         "absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full border-2 border-background",
         online ? "bg-ok" : "bg-muted-foreground/40",
       )}
+      role="img"
       aria-label={online ? "online" : "offline"}
     />
   );
@@ -142,7 +143,7 @@ export function PresenceStack({ chatId, online }: { chatId: string; online: stri
   if (here.length === 0) return null;
   const shown = here.slice(0, 4);
   return (
-    <div className="flex items-center" aria-label={`${here.length} online`}>
+    <div className="flex items-center" role="group" aria-label={`${here.length} online`}>
       {shown.map((m) => (
         <span key={m.user_id} title={`${m.name} is online`} className="-ml-1.5 first:ml-0">
           <Avatar name={m.name} color={m.avatar_color} size="sm" className="ring-2 ring-background" />
