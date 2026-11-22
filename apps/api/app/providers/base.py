@@ -61,6 +61,7 @@ class KeyCheck:
 class ModelInfo:
     id: str
     context_window: int | None = None
+    max_output_tokens: int | None = None
     extra: dict[str, str] = field(default_factory=dict)
 
 

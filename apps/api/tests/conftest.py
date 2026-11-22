@@ -52,6 +52,7 @@ def settings() -> Settings:
         key_encryption_keys=json.dumps(TEST_MASTER_KEYS),
         key_encryption_active_id="k2",
         dev_login=True,
+        message_rate_per_min=10_000,  # rate limiting has its own tests
     )
 
 

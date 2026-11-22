@@ -98,6 +98,10 @@ def chat_view(
         custom_instructions=chat.custom_instructions if is_owner else None,
         daily_token_cap=chat.daily_token_cap if is_owner else None,
         base_url=chat.base_url if is_owner else None,
+        rpm_limit=chat.rpm_limit if is_owner else None,
+        context_window=chat.context_window,
+        max_output_limit=chat.max_output_limit,
+        limits_source=chat.limits_source,
     )
 
 

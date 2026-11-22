@@ -78,6 +78,67 @@ export interface paths {
         patch: operations["patch_chat_chats__chat_id__patch"];
         trace?: never;
     };
+    "/chats/{chat_id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Context
+         * @description Snapshot written by the worker at the last turn (null fields before any).
+         */
+        get: operations["get_context_chats__chat_id__context_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chats/{chat_id}/context/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Compaction
+         * @description Owner: fold older history into the summary before the next reply.
+         */
+        post: operations["request_compaction_chats__chat_id__context_compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/chats/{chat_id}/context/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Summary
+         * @description Owner: drop the rolling summary; the next reply sees the full history again
+         *     (and re-summarizes if it doesn't fit).
+         */
+        delete: operations["clear_summary_chats__chat_id__context_summary_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/chats/{chat_id}/invites": {
         parameters: {
             query?: never;
@@ -306,6 +367,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/chats/{chat_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Usage */
+        get: operations["get_usage_chats__chat_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/healthz": {
         parameters: {
             query?: never;
@@ -462,6 +540,8 @@ export interface components {
             max_output_tokens?: number | null;
             /** Model */
             model?: string | null;
+            /** Rpm Limit */
+            rpm_limit?: number | null;
             /** Title */
             title?: string | null;
         };
@@ -479,6 +559,8 @@ export interface components {
         ChatView: {
             /** Base Url */
             base_url?: string | null;
+            /** Context Window */
+            context_window?: number | null;
             /**
              * Created At
              * Format: date-time
@@ -496,6 +578,10 @@ export interface components {
             key: components["schemas"]["KeyView"] | null;
             /** Last Seq */
             last_seq: number;
+            /** Limits Source */
+            limits_source?: ("provider" | "litellm" | "default") | null;
+            /** Max Output Limit */
+            max_output_limit?: number | null;
             /** Max Output Tokens */
             max_output_tokens: number;
             /** Member Count */
@@ -510,6 +596,8 @@ export interface components {
              * @enum {string}
              */
             role: "owner" | "editor" | "viewer";
+            /** Rpm Limit */
+            rpm_limit?: number | null;
             /** Status */
             status: string;
             /** Title */
@@ -519,6 +607,38 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** ContextView */
+        ContextView: {
+            /** Budget */
+            budget: number | null;
+            /** Compact Requested */
+            compact_requested: boolean;
+            /** Max Output */
+            max_output: number | null;
+            /** Percent */
+            percent: number | null;
+            /** Source */
+            source: string | null;
+            summary: components["schemas"]["SummaryInfo"] | null;
+            /** Used */
+            used: number | null;
+            /** Window */
+            window: number | null;
+        };
+        /** DayUsage */
+        DayUsage: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Est Cost Usd */
+            est_cost_usd: number | null;
+            /** Tokens In */
+            tokens_in: number;
+            /** Tokens Out */
+            tokens_out: number;
         };
         /** DevLoginIn */
         DevLoginIn: {
@@ -647,6 +767,33 @@ export interface components {
             csrf_token: string;
             user: components["schemas"]["UserView"];
         };
+        /**
+         * MemberPatch
+         * @description Either field may be sent; `member_token_cap: null` removes the cap.
+         */
+        MemberPatch: {
+            /** Member Token Cap */
+            member_token_cap?: number | null;
+            /** Role */
+            role?: ("editor" | "viewer") | null;
+        };
+        /** MemberUsage */
+        MemberUsage: {
+            /** Avatar Color */
+            avatar_color: string | null;
+            /** Member Token Cap */
+            member_token_cap: number | null;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string | null;
+            /** Tokens Today */
+            tokens_today: number;
+            /** Tokens Week */
+            tokens_week: number;
+            /** User Id */
+            user_id: string | null;
+        };
         /** MemberView */
         MemberView: {
             /** Avatar Color */
@@ -656,6 +803,8 @@ export interface components {
              * Format: date-time
              */
             joined_at: string;
+            /** Member Token Cap */
+            member_token_cap?: number | null;
             /** Name */
             name: string;
             /** Online */
@@ -741,14 +890,6 @@ export interface components {
             /** Status */
             status: string;
         };
-        /** RoleIn */
-        RoleIn: {
-            /**
-             * Role
-             * @enum {string}
-             */
-            role: "editor" | "viewer";
-        };
         /** RunningTurn */
         RunningTurn: {
             /** Author Ids */
@@ -784,6 +925,22 @@ export interface components {
             created: boolean;
             message: components["schemas"]["MessageView"];
         };
+        /** SummaryInfo */
+        SummaryInfo: {
+            /** Content */
+            content: string | null;
+            /** Covered Messages */
+            covered_messages: number;
+            /** Covers Through Seq */
+            covers_through_seq: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Tokens */
+            tokens: number;
+        };
         /** TurnControlOut */
         TurnControlOut: {
             /**
@@ -796,6 +953,26 @@ export interface components {
              * Format: uuid
              */
             turn_id: string;
+        };
+        /** UsageView */
+        UsageView: {
+            /** Daily Token Cap */
+            daily_token_cap: number | null;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Days */
+            days: components["schemas"]["DayUsage"][];
+            /** Est Cost Week Usd */
+            est_cost_week_usd: number | null;
+            /** Members */
+            members: components["schemas"]["MemberUsage"][];
+            /** Pricing Known */
+            pricing_known: boolean;
+            /** Used Today */
+            used_today: number;
         };
         /** UserRef */
         UserRef: {
@@ -1044,6 +1221,97 @@ export interface operations {
             };
         };
     };
+    get_context_chats__chat_id__context_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContextView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_compaction_chats__chat_id__context_compact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_summary_chats__chat_id__context_summary_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_invites_chats__chat_id__invites_get: {
         parameters: {
             query?: never;
@@ -1278,7 +1546,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RoleIn"];
+                "application/json": components["schemas"]["MemberPatch"];
             };
         };
         responses: {
@@ -1546,6 +1814,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TurnControlOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_usage_chats__chat_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageView"];
                 };
             };
             /** @description Validation Error */

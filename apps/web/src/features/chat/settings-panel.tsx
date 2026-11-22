@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { Chat } from "@/lib/api/client";
 import { useDeleteChat, usePatchChat, type ChatPatch } from "@/lib/api/hooks";
 import { KeySetup, ModelPicker } from "./key-setup";
+import { RpmField, UsagePanel } from "./limits";
 import { isChatReady } from "./setup-checklist";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -174,6 +175,12 @@ function OwnerSettings({ chat }: { chat: Chat }) {
             (UTC).
           </p>
         </form>
+        <RpmField chat={chat} onSave={(v) => save({ rpm_limit: v }, v ? "Limit saved" : "Using the default")} />
+      </Section>
+
+      <Separator />
+      <Section title="Usage">
+        <UsagePanel chat={chat} />
       </Section>
 
       <Separator />

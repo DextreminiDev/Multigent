@@ -20,9 +20,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.models import Chat, ChatKey, Message, Turn
+from app.events import Outbox
 from app.logging import get_logger
 from app.turns.lock import lock_key
 from app.turns.schedule import wake
+from app.usage.service import tokens_used
 
 log = get_logger("sweeper")
 
@@ -68,6 +70,32 @@ class Sweeper:
             return 0
         return await self.sweep()
 
+    async def _unpause_capped(self) -> int:
+        """Daily caps reset at 00:00 UTC (or the owner raised/removed the cap):
+        resume chats paused on their cap and run their queued messages."""
+        resumed = 0
+        async with self.sessionmaker() as db:
+            ids = list((await db.scalars(select(Chat.id).where(Chat.status == "paused_cap"))).all())
+        for chat_id in ids:
+            outbox = Outbox()
+            async with self.sessionmaker() as db:
+                chat = await db.scalar(select(Chat).where(Chat.id == chat_id).with_for_update())
+                if chat is None or chat.status != "paused_cap":
+                    continue
+                if chat.daily_token_cap and (
+                    await tokens_used(self.redis, db, chat_id) >= chat.daily_token_cap
+                ):
+                    continue
+                chat.status = "active"
+                await outbox.append(
+                    db, chat_id, "chat.updated", {"changed": ["status"], "status": "active"}
+                )
+                await db.commit()
+            await outbox.publish(self.redis)
+            await wake(self.redis, chat_id, 0)
+            resumed += 1
+        return resumed
+
     async def sweep(self) -> int:
         async with self.sessionmaker() as db:
             pending = set(
@@ -90,7 +118,7 @@ class Sweeper:
             running = set(
                 (await db.scalars(select(Turn.chat_id).where(Turn.status == "running"))).all()
             )
-        woke = 0
+        woke = await self._unpause_capped()
         for chat_id in pending | running:
             if await self.redis.exists(lock_key(chat_id)):
                 continue  # someone is on it (their finish re-checks for pending work)

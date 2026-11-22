@@ -13,6 +13,8 @@ import { useChat, useMe, useMembers } from "@/lib/api/hooks";
 import { cn } from "@/lib/utils";
 import { Conversation } from "./conversation";
 import { InviteDialog } from "./invite-dialog";
+import { ContextMeter } from "./limits";
+import type { ContextInfo } from "@/lib/ws/reducer";
 import { Participants, PresenceStack } from "./participants";
 import { SettingsPanel } from "./settings-panel";
 import { useLiveChat } from "./use-live-chat";
@@ -26,15 +28,19 @@ function Panel({
   meId,
   online,
   onInvite,
+  context,
 }: {
   chat: Chat;
   meId: string;
   online: string[] | null;
   onInvite: () => void;
+  context: ContextInfo | null;
 }) {
   return (
     <div className="space-y-6">
       <Participants chat={chat} meId={meId} online={online} onInvite={onInvite} />
+      <Separator />
+      <ContextMeter chat={chat} live={context} />
       <Separator />
       <SettingsPanel chat={chat} />
     </div>
@@ -153,7 +159,13 @@ export function ChatScreen({ chatId }: { chatId: string }) {
         <h2 className="mb-5 font-medium">
           <PanelHeading chat={c} />
         </h2>
-        <Panel chat={c} meId={meId} online={online} onInvite={openInvite} />
+        <Panel
+          chat={c}
+          meId={meId}
+          online={online}
+          onInvite={openInvite}
+          context={live.state?.context ?? null}
+        />
       </aside>
 
       {/* mobile: bottom sheet (people often join from invite links on phones) */}
@@ -166,6 +178,7 @@ export function ChatScreen({ chatId }: { chatId: string }) {
             chat={c}
             meId={meId}
             online={online}
+            context={live.state?.context ?? null}
             onInvite={() => {
               setSheetOpen(false);
               openInvite();

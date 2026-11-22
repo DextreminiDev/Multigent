@@ -120,6 +120,7 @@ class HttpKeyValidator:
                 ModelInfo(
                     id=m["name"].removeprefix("models/"),
                     context_window=m.get("inputTokenLimit"),
+                    max_output_tokens=m.get("outputTokenLimit"),
                     extra={"label": m.get("displayName", "")},
                 )
                 for m in data.get("models", [])
@@ -139,6 +140,7 @@ class HttpKeyValidator:
                 ModelInfo(
                     id=m["id"],
                     context_window=m.get("max_input_tokens"),
+                    max_output_tokens=m.get("max_tokens"),
                     extra={"label": m.get("display_name", "")},
                 )
                 for m in data.get("data", [])
@@ -161,6 +163,7 @@ class HttpKeyValidator:
                 ModelInfo(
                     id=m["id"],
                     context_window=m.get("context_length"),
+                    max_output_tokens=(m.get("top_provider") or {}).get("max_completion_tokens"),
                     extra={"label": m.get("name", "")},
                 )
                 for m in data.get("data", [])

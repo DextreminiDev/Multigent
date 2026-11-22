@@ -386,7 +386,8 @@ Server → client
 |---|---|---|
 | `message.created` / `message.updated` / `message.superseded` | yes | carry `seq` |
 | `turn.started` / `turn.completed` / `turn.failed` / `turn.cancelled` | yes | `turn.started` includes batch author ids |
-| `turn.status` | no | substate: `compacting`, `rate_limited{retry_in}`, `retrying` |
+| `turn.status` | no | substate: `compacting`, `rate_limited` / `unavailable` / `waiting_rate` `{retry_in, attempt, max_attempts, detail}`, `retrying` |
+| `context.update` | no | budget snapshot for the context meter |
 | `turn.delta` | no | `{turn_id, idx, text}` |
 | `member.updated` / `chat.updated` / `key.status` | yes | |
 | `presence.update` / `typing` | no | Redis TTL driven |
@@ -442,9 +443,10 @@ Implementations: `LiteLLMProvider` (Gemini, Anthropic, OpenAI, OpenRouter/OpenAI
 
 ### 9.3 Rate limits (free Gemini key is the primary target)
 
-- On `RateLimitError`/429 before any token streamed: backoff `min(60, 2^n + jitter)` s, honoring `retry_after` when present, max 3 tries. While waiting, emit `turn.status rate_limited{retry_in}` and keep the lock heartbeat alive.
+- On `RateLimitError`/429 **or `ProviderUnavailable`/503 ("high demand")** before any token streamed: backoff `min(60, 2^n) + jitter` s, honoring `retry_after` when present, max 3 retries. While waiting, emit `turn.status {status: rate_limited|unavailable, retry_in, attempt, max_attempts, detail}` (the UI shows a live countdown), keep the lock heartbeat alive, and stay interruptible by Stop.
+- **Stall guard:** a stream that sends no first chunk within 90 s, or goes silent for 45 s, fails as `unavailable` instead of waiting for the HTTP timeout.
 - If it still fails: `failed(rate_limit)` with a friendly message ("The model's free-tier limit was hit. Try again in a minute."), batch stays retryable.
-- A **per-chat concurrency of 1** already protects free-tier RPM. In addition, a per-key token bucket in Redis (`provider_rpm:{chat}`) lets the owner configure a requests-per-minute ceiling (default 10 for Gemini) so we queue instead of hitting 429s.
+- A **per-chat concurrency of 1** already protects free-tier RPM. In addition, a sliding-window limiter in Redis (`rpm:{chat}`, every provider call incl. summaries) applies `chats.rpm_limit` (owner-set; default 10 for Gemini, none otherwise), so calls wait (`turn.status waiting_rate {retry_in}`) instead of collecting 429s.
 - If error occurs *after* tokens streamed: no automatic retry (would duplicate visible text); `failed`, keep `partial_text`.
 
 ---
@@ -460,17 +462,24 @@ available   = budget − fixed − max_output_tokens
 needed      = tokens(history + batch)
 ```
 
-Context window per model comes from LiteLLM's model map; fallback default 32k with a warning in the settings panel. Token counts use `litellm.token_counter` with a `len/4` fallback, applied as an estimate with a 10% safety margin.
+**Limits differ per model, not per provider**, and no single source knows them all. When the owner picks a model the API resolves and stores `chats.context_window`, `max_output_limit` and `limits_source` (`app/turns/limits.py`), best source first:
+
+1. the provider's own model list (already fetched for the picker): Gemini `inputTokenLimit`/`outputTokenLimit`, Anthropic `max_input_tokens`/`max_tokens`, OpenRouter `context_length`/`top_provider.max_completion_tokens`;
+2. LiteLLM's bundled model map;
+3. a 32k default, flagged in the UI as an assumption.
+
+The owner's reply length is clamped to the model's output limit. Token counts use `litellm.token_counter` (`len/4` fallback). Its counts are an OpenAI-style approximation for other providers, hence the 30% headroom plus a 10% margin; the provider's own end-of-stream usage is what's billed and capped.
 
 ### 10.2 Compaction (rolling summary)
 
 Run as a **pre-step of the turn** (substate `compacting`), not a separate queue item, so it holds the same lock and can't race with another turn.
 
-1. If `needed > available`: pick `K` = the largest number of **most recent complete turns** that fits in ~40% of `available`; everything older is "to fold".
-2. Call the same provider/key with a summarization prompt: *previous summary + messages to fold → new summary*. Requirements: preserve who said what (by name), open questions, decisions, user-stated facts and preferences; neutral tone; hard token ceiling.
+1. If `needed > available`: keep the newest **complete exchanges** that fit in ~40% of `available`; everything older is "to fold". History is grouped by logical position (§6.4b), so a reply is never separated from the batch it answered. The current batch is always kept and doesn't count against that 40%.
+2. Call the same provider/key with a summarization prompt: *previous summary + messages to fold → new summary*. Requirements: preserve who said what (by name), open questions, decisions, user-stated facts and preferences; neutral tone. The summary lives in every later system prompt, so its size is budgeted too: `max_tokens = clamp(available / 4, 128, 1024)`.
 3. Insert a `chat_summaries` row with `covers_through_seq` at a turn boundary. Older messages remain in the DB (and in the UI) but are no longer sent to the model.
 4. Usage from the summarization call is recorded in `usage_events` (type tagged) like any other call.
-5. If a provider still returns `ContextTooLong` despite estimates, compact once more with `K` halved and retry the call once. A second failure → `failed(context)`.
+5. If a provider still returns `ContextTooLong` despite estimates, force a compaction (keep at most a quarter of the history) and retry the call once. A second failure → `failed(context)`. The owner's **Compact now** (`POST /chats/{id}/context/compact`) sets a flag the next claim consumes; a forced compaction keeps at most half the history. **Clear summary** (`DELETE /chats/{id}/context/summary`) drops it; the next reply re-summarizes if needed.
+6. After building each request the worker stores a budget snapshot (`chat:{id}:context`: window, budget, used, percent, source) and publishes `context.update`; `GET /chats/{id}/context` serves it with the latest summary's coverage (summary text to the owner only).
 
 The UI shows a context meter and "Summary covers messages 1-120". Owner can trigger "Compact now" or clear the summary.
 
@@ -534,10 +543,12 @@ class KeyVault(Protocol):
 
 ## 12. Usage, caps, cost control
 
-- Each completed (or partially completed) call writes `usage_events` with tokens in/out (provider-reported, else estimated) and `est_cost_usd` when pricing is known (null for unknown/free models; UI shows tokens only).
+- Each completed (or partially completed) call writes `usage_events` with tokens in/out (provider-reported, else estimated) and `est_cost_usd` from LiteLLM's price map when known (null for unknown/free models; UI shows tokens only). A turn's tokens are **split evenly across the authors of its batch**; summaries are chat-level (`user_id` NULL, kind `summary`).
 - **Daily token cap** (per chat) and optional **per-member cap**. Day boundary: UTC (documented; per-owner timezone is a later improvement).
-- Enforcement: cheap **pre-check** from a Redis counter `usage:{chat}:{yyyy-mm-dd}` (rebuilt from `usage_events` if missing). If the estimated input alone would exceed the remaining cap → don't start; chat → `paused_cap`, batch stays pending, `key.status`-style event tells everyone why. **Post-check** records actuals and may flip the chat to `paused_cap`.
-- Owner panel: tokens by member, by day, running estimated cost, context meter, cap controls.
+- Enforcement: cheap **pre-check** at claim from Redis counters `usage:{chat}:{yyyy-mm-dd}[:{user}]` (rebuilt from `usage_events` if missing). If today's usage plus a rough input estimate would exceed the cap → don't start; chat → `paused_cap`, batch stays pending, `chat.updated {status: paused_cap, reason: daily_cap}` tells everyone. **Post-check** after each turn may flip the chat to `paused_cap`. The sweeper resumes `paused_cap` chats once usage is back under the cap (new UTC day, or the owner raised/removed it) and re-runs their queue.
+- **Per-member caps** are enforced at send time: a member over their daily allowance gets `403 member_cap` (the owner is never capped by their own key).
+- **Message rate limit:** per user per chat, a Redis token bucket (`msgrate:{chat}:{user}`, default 6/min with an equal burst) → `429 rate_limited` with the wait in the message. Idempotent retries of an already-saved `client_msg_id` don't consume a token.
+- Owner panel (`GET /chats/{id}/usage`): today vs cap, last 7 days, tokens per member (today / week, incl. former members and summaries), estimated weekly cost when pricing is known, per-member cap inputs, RPM ceiling.
 
 ---
 
@@ -606,7 +617,10 @@ Additional layers:
 9. **Key validation lists models** instead of a completion call, so validation costs no tokens.
 10. **`turns.started_seq` + `anchor_seq`** (§6.4b): AI replies are ordered by their turn's start, not their insertion seq.
 11. **Delta coalescing happens in the worker**, not per connection (§8.4).
-12. **Demo mode:** the `fake` provider answers each person in the batch under their name (echoing their message), so batching and attribution are visible without any API key.
+12. **Demo mode:** the `fake` provider answers each person in the batch under their name (echoing their message), so batching and attribution are visible without any API key. It respects `max_tokens` like a real model.
+13. **Model limits are stored per chat** when the model is chosen (provider list first), rather than looked up per call.
+14. **503 "high demand" gets the same backoff as 429**, plus a stall guard for streams that open and go silent (seen live with free Gemini keys).
+15. **Per-member caps are enforced at send time** (clearer than pausing the whole chat for one member), and turn usage is split evenly across the batch's authors.
 
 ---
 

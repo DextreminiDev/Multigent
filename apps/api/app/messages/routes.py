@@ -74,6 +74,7 @@ async def post_message(
         client_msg_id=body.client_msg_id,
         content=body.content,
         debounce_ms=settings.debounce_ms,
+        rate_per_min=settings.message_rate_per_min,
     )
     response.status_code = 201 if res.created else 200
     return SendOut(message=to_view(res.message), created=res.created)

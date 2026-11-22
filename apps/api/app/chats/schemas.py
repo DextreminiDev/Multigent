@@ -46,6 +46,11 @@ class ChatView(BaseModel):
     custom_instructions: str | None = None
     daily_token_cap: int | None = None
     base_url: str | None = None
+    rpm_limit: int | None = None  # owner-only; None = provider default
+    # model limits (public): what the meter and composer reason about
+    context_window: int | None = None
+    max_output_limit: int | None = None
+    limits_source: Literal["provider", "litellm", "default"] | None = None
 
 
 class ChatCreate(BaseModel):
@@ -58,6 +63,7 @@ class ChatPatch(BaseModel):
     model: str | None = Field(default=None, min_length=1, max_length=200)
     max_output_tokens: int | None = Field(default=None, ge=16, le=65536)
     daily_token_cap: int | None = Field(default=None, ge=1)
+    rpm_limit: int | None = Field(default=None, ge=1, le=600)
 
     @field_validator("title")
     @classmethod

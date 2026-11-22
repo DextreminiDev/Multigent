@@ -33,6 +33,7 @@ from app.providers.errors import ProviderError
 from app.security.keyvault import EncryptedKey, KeyVault, KeyVaultError
 from app.security.redaction import registered_secret
 from app.security.urls import UnsafeUrlError, assert_public_url
+from app.turns.limits import ModelLimits, resolve_limits
 from app.turns.runner import cancel_key
 from app.turns.schedule import wake
 
@@ -114,23 +115,49 @@ async def get_chat(chat_id: ChatId, auth: AuthDep, db: DbDep) -> ChatView:
 
 @router.patch("/chats/{chat_id}", response_model=ChatView)
 async def patch_chat(
-    chat_id: ChatId, body: ChatPatch, auth: CsrfAuthDep, db: DbDep, redis: RedisDep
+    chat_id: ChatId,
+    body: ChatPatch,
+    request: Request,
+    auth: CsrfAuthDep,
+    db: DbDep,
+    redis: RedisDep,
 ) -> ChatView:
+    m = await require(db, chat_id, auth.user.id, Action.MANAGE_CHAT)
+    limits: ModelLimits | None = None
+    if body.model is not None and body.model != m.chat.model:
+        # resolve before taking the row lock: it may call the provider
+        limits = await _resolve_model_limits(request, db, m.chat, body.model)
     m = await require(db, chat_id, auth.user.id, Action.MANAGE_CHAT, for_update=True)
     changed: list[str] = []
+    clearable = {"daily_token_cap", "rpm_limit"}
     for field in body.model_fields_set:
         value = getattr(body, field)
-        if value is None and field != "daily_token_cap":
-            continue  # only the cap is clearable
+        if value is None and field not in clearable:
+            continue
         if getattr(m.chat, field) != value:
             setattr(m.chat, field, value)
             changed.append(field)
+    if limits is not None and "model" in changed:
+        m.chat.context_window = limits.context_window
+        m.chat.max_output_limit = limits.max_output
+        m.chat.limits_source = limits.source
+        changed.append("limits")
+    if m.chat.max_output_limit and m.chat.max_output_tokens > m.chat.max_output_limit:
+        m.chat.max_output_tokens = (
+            m.chat.max_output_limit
+        )  # never ask for more than the model can give
+        if "max_output_tokens" not in changed:
+            changed.append("max_output_tokens")
     if changed:
         if m.chat.status == "paused_cap" and "daily_token_cap" in changed:
             m.chat.status = "active"  # the cap check re-pauses if still exceeded
         public: dict[str, object] = {
             f: getattr(m.chat, f) for f in ("title", "model", "max_output_tokens") if f in changed
         }
+        if "limits" in changed:
+            public.update(context_window=m.chat.context_window,
+                          max_output_limit=m.chat.max_output_limit,
+                          limits_source=m.chat.limits_source)  # fmt: skip
         outbox = Outbox()
         await outbox.append(
             db,
@@ -141,9 +168,27 @@ async def patch_chat(
         await db.commit()
         await outbox.publish(redis)
         await db.refresh(m.chat)
-        if {"model", "daily_token_cap"} & set(changed):
+        if {"model", "daily_token_cap", "rpm_limit"} & set(changed):
             await wake(redis, chat_id)  # queued messages may now be runnable
     return await build_chat_view(db, m)
+
+
+async def _resolve_model_limits(request: Request, db: DbDep, chat: Chat, model: str) -> ModelLimits:
+    """Look the model up in the provider's own list (best source), falling back to
+    LiteLLM's map and then a default. Never fails the PATCH."""
+    listed = None
+    if chat.provider:
+        try:
+            key, plaintext = await _decrypt_stored(request, db, chat)
+            with registered_secret(plaintext):
+                models = await _validator(request).list_models(
+                    key.provider, plaintext, chat.base_url
+                )
+            del plaintext
+            listed = next((x for x in models if x.id == model), None)
+        except (ApiError, ProviderError):
+            listed = None
+    return resolve_limits(chat.provider or "", model, listed)
 
 
 @router.delete("/chats/{chat_id}", status_code=204)

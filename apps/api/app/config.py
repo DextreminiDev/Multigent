@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     allow_private_base_urls: bool = False  # SSRF guard for openai_compatible
 
     debounce_ms: int = 800
+    message_rate_per_min: int = 6  # per user per chat (token bucket, burst = this)
     worker_max_concurrent_turns: int = 20
     shutdown_grace_s: int = 30
 

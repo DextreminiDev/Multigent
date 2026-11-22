@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from app.providers.base import (
     Chunk,
     Finish,
+    FinishReason,
     KeyCheck,
     ModelInfo,
     Msg,
@@ -41,6 +42,8 @@ class FakeScript:
     fail_at_chunk: int | None = None
     fail_with: ProviderError | None = None
     rate_limit_first_n: int = 0
+    fail_first_n: int = 0  # raise `fail_first_with` on the first n calls
+    fail_first_with: ProviderError | None = None
     retry_after: float | None = None
     blocked: bool = False
     hang: bool = False
@@ -81,6 +84,8 @@ class FakeProvider:
         s = self.script
         self.calls.append(req)
         self._check_key(api_key)
+        if len(self.calls) <= s.fail_first_n:
+            raise s.fail_first_with or ProviderError("injected failure")
         if len(self.calls) <= s.rate_limit_first_n:
             raise RateLimitError("429 Too Many Requests", retry_after=s.retry_after)
         if s.blocked:
@@ -88,7 +93,11 @@ class FakeProvider:
 
         chunks = s.chunks if s.chunks is not None else self.echo_reply(req)
         out = ""
+        finish: FinishReason = "stop"
         for i, text in enumerate(chunks):
+            if estimate_tokens(out + text) > req.max_tokens:  # like a real model
+                finish = "length"
+                break
             if s.hang and i >= s.hang_after:
                 await asyncio.Event().wait()  # until cancelled
             if s.fail_at_chunk is not None and i >= s.fail_at_chunk:
@@ -104,7 +113,7 @@ class FakeProvider:
             tokens_in=self.count_tokens(req.model, req.messages, req.system),
             tokens_out=estimate_tokens(out),
         )
-        yield Finish("stop")
+        yield Finish(finish)
 
     async def validate_key(
         self, provider: str, api_key: str, base_url: str | None = None

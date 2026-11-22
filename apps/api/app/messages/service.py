@@ -23,6 +23,7 @@ from app.errors import ApiError
 from app.events import Outbox, allocate_seq
 from app.ids import uuid7
 from app.turns.schedule import wake
+from app.usage.service import take_message_token, tokens_used
 from app.users.names import avatar_color
 
 MAX_MESSAGE_CHARS = 8000
@@ -82,11 +83,26 @@ async def send_message(
     client_msg_id: uuid.UUID,
     content: str,
     debounce_ms: int,
+    rate_per_min: int = 6,
 ) -> SendResult:
     content = validate_content(content)
-    await require(db, chat_id, user.id, Action.SEND)
+    m = await require(db, chat_id, user.id, Action.SEND)
     if (prior := await _existing(db, chat_id, client_msg_id)) is not None:
-        return SendResult(prior, created=False)
+        return SendResult(prior, created=False)  # retries never cost a rate-limit token
+    wait = await take_message_token(redis, chat_id, user.id, rate_per_min)
+    if wait is not None:
+        raise ApiError(
+            429,
+            "rate_limited",
+            f"You're sending messages too fast. Try again in {max(1, round(wait))}s.",
+        )
+    cap = m.member.member_token_cap
+    if cap and await tokens_used(redis, db, chat_id, user_id=user.id) >= cap:
+        raise ApiError(
+            403,
+            "member_cap",
+            "You've used your daily token allowance in this chat. It resets at 00:00 UTC.",
+        )
 
     outbox = Outbox()
     try:

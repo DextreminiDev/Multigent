@@ -100,6 +100,19 @@
             ],
             "title": "Model"
           },
+          "rpm_limit": {
+            "anyOf": [
+              {
+                "maximum": 600.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rpm Limit"
+          },
           "title": {
             "anyOf": [
               {
@@ -167,6 +180,17 @@
             ],
             "title": "Base Url"
           },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -213,6 +237,33 @@
             "title": "Last Seq",
             "type": "integer"
           },
+          "limits_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "provider",
+                  "litellm",
+                  "default"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limits Source"
+          },
+          "max_output_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Limit"
+          },
           "max_output_tokens": {
             "title": "Max Output Tokens",
             "type": "integer"
@@ -255,6 +306,17 @@
             "title": "Role",
             "type": "string"
           },
+          "rpm_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rpm Limit"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -285,6 +347,138 @@
           "updated_at"
         ],
         "title": "ChatView",
+        "type": "object"
+      },
+      "ContextView": {
+        "properties": {
+          "budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget"
+          },
+          "compact_requested": {
+            "title": "Compact Requested",
+            "type": "boolean"
+          },
+          "max_output": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output"
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SummaryInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window"
+          }
+        },
+        "required": [
+          "window",
+          "budget",
+          "used",
+          "percent",
+          "source",
+          "max_output",
+          "summary",
+          "compact_requested"
+        ],
+        "title": "ContextView",
+        "type": "object"
+      },
+      "DayUsage": {
+        "properties": {
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "est_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Usd"
+          },
+          "tokens_in": {
+            "title": "Tokens In",
+            "type": "integer"
+          },
+          "tokens_out": {
+            "title": "Tokens Out",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "tokens_in",
+          "tokens_out",
+          "est_cost_usd"
+        ],
+        "title": "DayUsage",
         "type": "object"
       },
       "DevLoginIn": {
@@ -614,6 +808,112 @@
         "title": "MeView",
         "type": "object"
       },
+      "MemberPatch": {
+        "description": "Either field may be sent; `member_token_cap: null` removes the cap.",
+        "properties": {
+          "member_token_cap": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Token Cap"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "editor",
+                  "viewer"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "title": "MemberPatch",
+        "type": "object"
+      },
+      "MemberUsage": {
+        "properties": {
+          "avatar_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Color"
+          },
+          "member_token_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Token Cap"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "tokens_today": {
+            "title": "Tokens Today",
+            "type": "integer"
+          },
+          "tokens_week": {
+            "title": "Tokens Week",
+            "type": "integer"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "user_id",
+          "name",
+          "avatar_color",
+          "role",
+          "tokens_today",
+          "tokens_week",
+          "member_token_cap"
+        ],
+        "title": "MemberUsage",
+        "type": "object"
+      },
       "MemberView": {
         "properties": {
           "avatar_color": {
@@ -624,6 +924,17 @@
             "format": "date-time",
             "title": "Joined At",
             "type": "string"
+          },
+          "member_token_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Token Cap"
           },
           "name": {
             "title": "Name",
@@ -879,23 +1190,6 @@
         "title": "Readiness",
         "type": "object"
       },
-      "RoleIn": {
-        "properties": {
-          "role": {
-            "enum": [
-              "editor",
-              "viewer"
-            ],
-            "title": "Role",
-            "type": "string"
-          }
-        },
-        "required": [
-          "role"
-        ],
-        "title": "RoleIn",
-        "type": "object"
-      },
       "RunningTurn": {
         "properties": {
           "author_ids": {
@@ -988,6 +1282,47 @@
         "title": "SendOut",
         "type": "object"
       },
+      "SummaryInfo": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "covered_messages": {
+            "title": "Covered Messages",
+            "type": "integer"
+          },
+          "covers_through_seq": {
+            "title": "Covers Through Seq",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "covers_through_seq",
+          "covered_messages",
+          "created_at",
+          "tokens",
+          "content"
+        ],
+        "title": "SummaryInfo",
+        "type": "object"
+      },
       "TurnControlOut": {
         "properties": {
           "status": {
@@ -1013,6 +1348,70 @@
           "status"
         ],
         "title": "TurnControlOut",
+        "type": "object"
+      },
+      "UsageView": {
+        "properties": {
+          "daily_token_cap": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Token Cap"
+          },
+          "day": {
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/DayUsage"
+            },
+            "title": "Days",
+            "type": "array"
+          },
+          "est_cost_week_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Est Cost Week Usd"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/MemberUsage"
+            },
+            "title": "Members",
+            "type": "array"
+          },
+          "pricing_known": {
+            "title": "Pricing Known",
+            "type": "boolean"
+          },
+          "used_today": {
+            "title": "Used Today",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "daily_token_cap",
+          "used_today",
+          "members",
+          "days",
+          "est_cost_week_usd",
+          "pricing_known"
+        ],
+        "title": "UsageView",
         "type": "object"
       },
       "UserRef": {
@@ -1361,6 +1760,129 @@
         "summary": "Patch Chat",
         "tags": [
           "chats"
+        ]
+      }
+    },
+    "/chats/{chat_id}/context": {
+      "get": {
+        "description": "Snapshot written by the worker at the last turn (null fields before any).",
+        "operationId": "get_context_chats__chat_id__context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Context",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/chats/{chat_id}/context/compact": {
+      "post": {
+        "description": "Owner: fold older history into the summary before the next reply.",
+        "operationId": "request_compaction_chats__chat_id__context_compact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Compaction",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/chats/{chat_id}/context/summary": {
+      "delete": {
+        "description": "Owner: drop the rolling summary; the next reply sees the full history again\n(and re-summarizes if it doesn't fit).",
+        "operationId": "clear_summary_chats__chat_id__context_summary_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Summary",
+        "tags": [
+          "usage"
         ]
       }
     },
@@ -1713,7 +2235,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RoleIn"
+                "$ref": "#/components/schemas/MemberPatch"
               }
             }
           },
@@ -2166,6 +2688,49 @@
         "summary": "Retry Turn",
         "tags": [
           "turns"
+        ]
+      }
+    },
+    "/chats/{chat_id}/usage": {
+      "get": {
+        "operationId": "get_usage_chats__chat_id__usage_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "chat_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Chat Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Usage",
+        "tags": [
+          "usage"
         ]
       }
     },

@@ -99,6 +99,13 @@ class Chat(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
     last_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     daily_token_cap: Mapped[int | None] = mapped_column(Integer)
+    # Model limits resolved when the model is chosen (§10.1): provider list > LiteLLM
+    # map > default. `limits_source` says which, so the UI can flag guesses.
+    context_window: Mapped[int | None] = mapped_column(Integer)
+    max_output_limit: Mapped[int | None] = mapped_column(Integer)
+    limits_source: Mapped[str | None] = mapped_column(Text)
+    # Proactive requests/minute ceiling for the owner's key (None = provider default).
+    rpm_limit: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[dt.datetime] = _ts()
     updated_at: Mapped[dt.datetime] = _ts()
 

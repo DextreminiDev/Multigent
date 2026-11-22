@@ -104,3 +104,13 @@ async def test_list_models_and_count_tokens() -> None:
     p = FakeProvider()
     assert [m.id for m in await p.list_models("fake", "k")] == ["fake-small", "fake-large"]
     assert p.count_tokens("m", [Msg("user", "abcd" * 10)]) == 10
+
+
+async def test_respects_max_tokens_like_a_real_model() -> None:
+    req = ProviderRequest(
+        provider="fake", model="m", system="", max_tokens=5, messages=[Msg("user", "word " * 200)]
+    )
+    chunks = [c async for c in FakeProvider().stream_chat(req, "k")]
+    text = "".join(c.text for c in chunks if isinstance(c, TextDelta))
+    assert len(text) // 4 <= 5
+    assert chunks[-1] == Finish("length")

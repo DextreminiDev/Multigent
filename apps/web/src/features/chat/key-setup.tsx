@@ -292,6 +292,13 @@ export function ModelPicker({ chat }: { chat: Chat }) {
           <CheckCircle2 className="size-3 text-ok" /> Everyone in this chat talks to {chat.model}
         </p>
       )}
+      {chat.model && chat.context_window && (
+        <p className="text-xs text-muted-foreground">
+          Context window {chat.context_window.toLocaleString()} tokens
+          {chat.max_output_limit ? ` · replies up to ${chat.max_output_limit.toLocaleString()}` : ""}
+          {chat.limits_source === "default" ? " (unknown for this model, assumed)" : ""}
+        </p>
+      )}
     </div>
   );
 }

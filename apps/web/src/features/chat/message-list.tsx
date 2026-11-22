@@ -16,7 +16,8 @@ import { Avatar } from "@/components/avatar";
 import { CopyButton, Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import type { ChatMessage } from "@/lib/api/client";
-import type { FailedTurn, LiveState, LiveTurn, PendingSend } from "@/lib/ws/reducer";
+import type { FailedTurn, LiveState, LiveTurn, PendingSend, TurnStatus } from "@/lib/ws/reducer";
+import { TurnStatusLine } from "./limits";
 import { lastAiMessageId, timeline, turnAuthorIds } from "@/lib/ws/reducer";
 import { cn } from "@/lib/utils";
 
@@ -158,10 +159,20 @@ function SendingMessage({
   );
 }
 
-function StreamingMessage({ turn, names }: { turn: LiveTurn; names: string[] }) {
+function StreamingMessage({
+  turn,
+  names,
+  status,
+}: {
+  turn: LiveTurn;
+  names: string[];
+  status: TurnStatus | null;
+}) {
   return (
     <AiFrame replyingTo={names} label="Assistant is replying">
-      {turn.text ? (
+      {status && !turn.text ? (
+        <TurnStatusLine status={status} />
+      ) : turn.text ? (
         <div>
           <Markdown text={turn.text} streaming />
           <span className="streaming-caret" aria-hidden />
@@ -370,7 +381,14 @@ export function MessageList({
                 );
               }
               case "streaming":
-                return <StreamingMessage key={it.key} turn={it.turn} names={streamingNames} />;
+                return (
+                  <StreamingMessage
+                    key={it.key}
+                    turn={it.turn}
+                    names={streamingNames}
+                    status={state.turnStatus?.turnId === it.turn.id ? state.turnStatus : null}
+                  />
+                );
               case "failed":
                 return (
                   <FailedMessage

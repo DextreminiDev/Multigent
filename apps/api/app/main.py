@@ -27,6 +27,7 @@ from app.realtime.hub import Hub
 from app.redis_client import make_redis
 from app.security.keyvault import KeyVault, LocalKeyVault
 from app.turns.routes import router as turns_router
+from app.usage.routes import router as usage_router
 
 log = get_logger("api")
 
@@ -98,6 +99,7 @@ def create_app(
     app.include_router(members_router)
     app.include_router(invites_router)
     app.include_router(turns_router)
+    app.include_router(usage_router)
     app.include_router(ws_router)
     return app
 

@@ -14,7 +14,7 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.chats.permissions import Action, authorize
@@ -36,17 +36,22 @@ class MemberView(BaseModel):
     role: Literal["owner", "editor", "viewer"]
     joined_at: dt.datetime
     online: bool
+    member_token_cap: int | None = None  # owner-only (null for collaborators)
 
 
-class RoleIn(BaseModel):
-    role: Literal["editor", "viewer"]
+class MemberPatch(BaseModel):
+    """Either field may be sent; `member_token_cap: null` removes the cap."""
+
+    role: Literal["editor", "viewer"] | None = None
+    member_token_cap: int | None = Field(default=None, ge=1)
 
 
 @router.get("/chats/{chat_id}/members", response_model=list[MemberView])
 async def list_members(
     chat_id: uuid.UUID, request: Request, auth: AuthDep, db: DbDep, redis: RedisDep
 ) -> list[MemberView]:
-    await require(db, chat_id, auth.user.id, Action.READ)
+    me = await require(db, chat_id, auth.user.id, Action.READ)
+    owner_view = me.role == "owner"
     rows = (
         await db.execute(
             select(User, ChatMember)
@@ -65,6 +70,7 @@ async def list_members(
             role=m.role,
             joined_at=m.joined_at,
             online=str(u.id) in online,
+            member_token_cap=m.member_token_cap if owner_view else None,
         )
         for u, m in rows
     ]
@@ -83,17 +89,26 @@ async def _target(db: DbDep, chat_id: uuid.UUID, user_id: uuid.UUID) -> tuple[Ch
 async def change_role(
     chat_id: uuid.UUID,
     user_id: uuid.UUID,
-    body: RoleIn,
+    body: MemberPatch,
     auth: CsrfAuthDep,
     db: DbDep,
     redis: RedisDep,
 ) -> MemberView:
     await require(db, chat_id, auth.user.id, Action.MANAGE_MEMBERS, for_update=True)
     member, user = await _target(db, chat_id, user_id)
-    if member.role == "owner":
+    if member.role == "owner" and body.role is not None:
         raise ApiError(409, "owner_role", "The owner's role can't be changed")
-    if member.role != body.role:
+    changed = False
+    if body.role is not None and member.role != body.role:
         member.role = body.role
+        changed = True
+    if (
+        "member_token_cap" in body.model_fields_set
+        and member.member_token_cap != body.member_token_cap
+    ):
+        member.member_token_cap = body.member_token_cap
+        changed = True
+    if changed:
         outbox = Outbox()
         await member_updated(db, outbox, chat_id, user, member)
         await db.commit()
@@ -106,6 +121,7 @@ async def change_role(
         role=member.role,
         joined_at=member.joined_at,
         online=str(user.id) in online,
+        member_token_cap=member.member_token_cap,
     )
 
 

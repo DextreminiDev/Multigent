@@ -3,7 +3,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, unwrap } from "@/lib/api/client";
-import { qk, qkm } from "@/lib/api/hooks";
+import { qk, qkm, qku } from "@/lib/api/hooks";
 import { API_URL } from "@/lib/config";
 import { getWsClient, WsRequestError, type ConnStatus } from "@/lib/ws/client";
 import {
@@ -79,6 +79,12 @@ export function useLiveChat(chatId: string): LiveChat {
       }
       if (ev.type === "member.updated") {
         qc.invalidateQueries({ queryKey: qkm.members(chatId) });
+      }
+      if (ev.type === "context.update") {
+        qc.invalidateQueries({ queryKey: qku.context(chatId) }); // summary + queued flag
+      }
+      if (ev.type === "turn.completed" || ev.type === "turn.cancelled") {
+        qc.invalidateQueries({ queryKey: qku.usage(chatId) });
       }
     },
     [chatId, commit, qc],

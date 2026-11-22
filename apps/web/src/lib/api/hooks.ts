@@ -119,6 +119,7 @@ export type ChatPatch = {
   model?: string;
   max_output_tokens?: number;
   daily_token_cap?: number | null;
+  rpm_limit?: number | null;
 };
 
 export function usePatchChat(id: string) {
@@ -314,5 +315,64 @@ export function useDeletePending(chatId: string) {
           params: { path: { chat_id: chatId, message_id: messageId } },
         }),
       ),
+  });
+}
+
+// ------------------------------------------------------------------ context & usage
+
+export type ContextView = Schemas["ContextView"];
+export type UsageView = Schemas["UsageView"];
+
+export const qku = {
+  context: (id: string) => ["chats", id, "context"] as const,
+  usage: (id: string) => ["chats", id, "usage"] as const,
+};
+
+export function useContextInfo(chatId: string) {
+  return useQuery({
+    queryKey: qku.context(chatId),
+    queryFn: () => unwrap(api.GET("/chats/{chat_id}/context", path(chatId))),
+  });
+}
+
+export function useUsage(chatId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qku.usage(chatId),
+    queryFn: () => unwrap(api.GET("/chats/{chat_id}/usage", path(chatId))),
+    enabled,
+    refetchInterval: enabled ? 30_000 : false,
+  });
+}
+
+export function useCompactNow(chatId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(api.POST("/chats/{chat_id}/context/compact", path(chatId))),
+    onSettled: () => qc.invalidateQueries({ queryKey: qku.context(chatId) }),
+  });
+}
+
+export function useClearSummary(chatId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => unwrap(api.DELETE("/chats/{chat_id}/context/summary", path(chatId))),
+    onSettled: () => qc.invalidateQueries({ queryKey: qku.context(chatId) }),
+  });
+}
+
+export function useSetMemberCap(chatId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, cap }: { userId: string; cap: number | null }) =>
+      unwrap(
+        api.PATCH("/chats/{chat_id}/members/{user_id}", {
+          params: { path: { chat_id: chatId, user_id: userId } },
+          body: { member_token_cap: cap },
+        }),
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: qku.usage(chatId) });
+      qc.invalidateQueries({ queryKey: qkm.members(chatId) });
+    },
   });
 }

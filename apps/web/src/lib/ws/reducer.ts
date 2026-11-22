@@ -49,6 +49,25 @@ export type PendingSend = {
   error?: string;
 };
 
+export type TurnStatus = {
+  turnId: string;
+  status: "rate_limited" | "unavailable" | "waiting_rate" | "compacting" | "retrying";
+  /** epoch ms when the wait ends (for a live countdown), if any */
+  until: number | null;
+  attempt: number | null;
+  maxAttempts: number | null;
+  detail: string | null;
+};
+
+export type ContextInfo = {
+  window: number;
+  budget: number;
+  used: number;
+  percent: number;
+  source: string;
+  summaryThrough: number | null;
+};
+
 export type ChatMeta = {
   title?: string;
   model?: string | null;
@@ -73,6 +92,10 @@ export type LiveState = {
   typing: Record<string, { name: string; until: number }>;
   /** bumps on member.updated so the UI can refetch members */
   membersVersion: number;
+  /** sub-state of the running turn: backoff, pacing, compacting (ephemeral) */
+  turnStatus: TurnStatus | null;
+  /** latest context-budget snapshot from the worker */
+  context: ContextInfo | null;
   /** bumps when a reply finishes, for the aria-live announcer */
   completedCount: number;
 };
@@ -109,6 +132,8 @@ export function initialState(
     online: [],
     typing: {},
     membersVersion: 0,
+    turnStatus: null,
+    context: null,
     completedCount: 0,
   };
 }
@@ -264,6 +289,18 @@ function applyPersisted(s: LiveState, ev: ServerEvent): LiveState {
 }
 
 export function applyEvent(s: LiveState, ev: ServerEvent, now: number = Date.now()): LiveState {
+  const next = applyEventInner(s, ev, now);
+  if (
+    next !== s &&
+    next.turnStatus &&
+    (ev.type === "turn.completed" || ev.type === "turn.failed" || ev.type === "turn.cancelled")
+  ) {
+    return { ...next, turnStatus: null };
+  }
+  return next;
+}
+
+function applyEventInner(s: LiveState, ev: ServerEvent, now: number): LiveState {
   if (ev.type === "resync_required") return { ...s, needsResync: true };
   if (ev.type === "chat.deleted") return { ...s, deleted: true };
   if (ev.type === "kicked") return { ...s, kicked: true };
@@ -285,6 +322,34 @@ export function applyEvent(s: LiveState, ev: ServerEvent, now: number = Date.now
         : { id, startedSeq: null, messageIds: [], authorIds: [], chunks: {}, text: "" };
       return { ...s, turn: { ...base, chunks, text: textOf(chunks) } };
     }
+    case "turn.status": {
+      const turnId = p.turn_id as string;
+      if (s.turn && s.turn.id !== turnId) return s;
+      const retryIn = typeof p.retry_in === "number" ? (p.retry_in as number) : null;
+      return {
+        ...s,
+        turnStatus: {
+          turnId,
+          status: p.status as TurnStatus["status"],
+          until: retryIn != null ? now + retryIn * 1000 : null,
+          attempt: (p.attempt as number | undefined) ?? null,
+          maxAttempts: (p.max_attempts as number | undefined) ?? null,
+          detail: (p.detail as string | undefined) ?? null,
+        },
+      };
+    }
+    case "context.update":
+      return {
+        ...s,
+        context: {
+          window: p.window as number,
+          budget: p.budget as number,
+          used: p.used as number,
+          percent: p.percent as number,
+          source: String(p.source ?? "default"),
+          summaryThrough: (p.summary_through as number | null) ?? null,
+        },
+      };
     case "presence.update":
       return { ...s, online: (p.online as string[]) ?? [] };
     case "typing": {
@@ -301,7 +366,11 @@ export function applyEvent(s: LiveState, ev: ServerEvent, now: number = Date.now
       const idx = p.idx as number;
       if (s.turn.chunks[idx] !== undefined) return s;
       const chunks = { ...s.turn.chunks, [idx]: p.text as string };
-      return { ...s, turn: { ...s.turn, chunks, text: textOf(chunks) } };
+      return {
+        ...s,
+        turn: { ...s.turn, chunks, text: textOf(chunks) },
+        turnStatus: null, // text is flowing: any backoff/compacting state is over
+      };
     }
     default:
       return s;

@@ -32,6 +32,11 @@ export function pauseNotice(chat: Chat): string | null {
       ? "Your API key was rejected. Replace it in chat settings; queued messages will then be answered."
       : "The owner's API key needs attention. Messages will wait until it's fixed.";
   }
+  if (chat.status === "paused_cap") {
+    return chat.role === "owner"
+      ? "Today's token cap for this chat is used up. Messages wait until 00:00 UTC, or raise the cap in settings."
+      : "Today's token cap for this chat is used up. Messages will be answered after 00:00 UTC.";
+  }
   if (!isChatReady(chat)) {
     return chat.role === "owner"
       ? "Add an API key and pick a model to get replies."
