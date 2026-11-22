@@ -85,6 +85,11 @@ export function Composer({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    if (!text) {
+      // one row; don't measure (Chrome counts a wrapped placeholder in scrollHeight)
+      el.style.height = "";
+      return;
+    }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 240)}px`;
   }, [text]);
@@ -284,7 +289,8 @@ export function Composer({
           {text.trim() && !tooLong && !conflict && <IntentPreview intent={intent} />}
           <span
             className={cn(
-              "truncate text-xs text-muted-foreground",
+              "text-xs text-muted-foreground",
+              conflict ? "leading-snug" : "truncate", // the warning must be readable in full
               (tooLong || conflict) && "text-destructive",
             )}
           >

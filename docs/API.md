@@ -14,7 +14,7 @@ The REST API is described by its OpenAPI schema: [`apps/web/openapi.json`](../ap
 | Area | Endpoints |
 |---|---|
 | Auth | `GET /auth/providers`, `GET /auth/{google,github}/login`, `GET /auth/{provider}/callback`, `POST /auth/dev/login` (dev only), `POST /auth/logout`, `GET /me`, `DELETE /me` |
-| Chats | `POST /chats`, `GET /chats`, `GET /chats/{id}`, `PATCH /chats/{id}` (owner: title, instructions, model, caps, `reply_mode`: `always` or `tags`), `DELETE /chats/{id}` |
+| Chats | `POST /chats`, `GET /chats`, `GET /chats/{id}`, `PATCH /chats/{id}` (owner: title, instructions, model, caps), `DELETE /chats/{id}` |
 | Messages | `GET /chats/{id}/state` (consistent snapshot for subscribing), `GET /chats/{id}/messages?before_seq=&limit=`, `POST /chats/{id}/messages`, `DELETE /chats/{id}/messages/{msg_id}` (own, still queued) |
 | Turn controls | `POST /chats/{id}/turns/{turn_id}/cancel`, `POST /chats/{id}/turns/{turn_id}/retry`, `POST /chats/{id}/messages/{ai_id}/regenerate` |
 | Key slot | `PUT /chats/{id}/key` (write-only), `DELETE /chats/{id}/key`, `POST /chats/{id}/key/validate`, `GET /chats/{id}/models`, `GET /providers` |
@@ -35,7 +35,7 @@ Every frame may carry a `ref`; the server answers `{"type":"ack","ref":...}` or 
 |---|---|---|
 | `subscribe` | `chat_id`, `after_seq` | Replays persisted events after `after_seq`, then a `turn.snapshot` if a reply is streaming, then live events. The ack carries the resulting `seq`. |
 | `unsubscribe` | `chat_id` | |
-| `message.send` | `chat_id`, `client_msg_id` (UUID), `content` | Idempotent on `client_msg_id`; the ack includes the saved message and `created` |
+| `message.send` | `chat_id`, `client_msg_id` (UUID), `content`, `mentions` (optional), `off` (optional) | Idempotent on `client_msg_id`; the ack includes the saved message and `created`. See *Mentions* below |
 | `turn.cancel` | `chat_id`, `turn_id` | Same rules as the REST cancel |
 | `typing` | `chat_id` | Editors/owner only; throttled |
 
@@ -47,7 +47,7 @@ Persisted events carry a per-chat `seq` (strictly increasing, gapless). Clients 
 |---|---|---|
 | `chat.created`, `chat.updated` | yes | public chat fields that changed, `status` |
 | `key.status` | yes | `status` (`ok`/`invalid`/`missing`…), `chat_status` |
-| `message.created` | yes | `message` (with `anchor_seq`, `client_msg_id`, and `intent` for human messages: `reply`, `context` or `off`) |
+| `message.created` | yes | `message` (with `anchor_seq`, `client_msg_id`, and for human messages `intent` (`reply`, `context` or `off`) and `mentions`) |
 | `message.updated` | yes | `message` (e.g. a queued message deleted by its author) |
 | `message.superseded` | yes | `message_id`, `message_ids` re-queued (regenerate) |
 | `member.updated` | yes | `member` (`user_id`, `name`, `role`, `removed`) |
@@ -67,3 +67,24 @@ Persisted events carry a per-chat `seq` (strictly increasing, gapless). Clients 
 | `resync_required` | no | `last_seq`: refetch `GET /chats/{id}/state` and resubscribe |
 
 **Resume guarantee:** the server subscribes to the chat's pub/sub channel *before* reading the event log, buffers live events during the replay, and drops any whose `seq` was already replayed. Together with `idx`-deduplicated deltas, a reconnecting client sees every event exactly once (see `tests/test_ws.py` and the Playwright reconnect test).
+
+## Mentions
+
+`POST /chats/{id}/messages` and WS `message.send` take the same fields:
+
+```jsonc
+{
+  "client_msg_id": "…",
+  "content": "@AI @Bob what do you both think?",
+  "mentions": [
+    { "type": "ai", "offset": 0, "length": 3 },
+    { "type": "user", "offset": 4, "length": 4, "user_id": "018f…" }
+  ],
+  "off": false
+}
+```
+
+- `type` is `ai`, `everyone` or `user` (`user` needs `user_id`). `offset`/`length` are UTF-16 code units over `content`, and the range must start with "@". At most 50.
+- Only a mention of `ai` asks for a reply. `off: true` sends the message off the record (never shown to the AI).
+- Invalid mentions (bad ranges, the sender, non-members) are dropped and their text stays plain. `off: true` with an `ai` mention returns `422 off_with_ai` and nothing is saved.
+- Saved messages carry `intent` and `mentions`; user mentions include `name`, the name at send time.

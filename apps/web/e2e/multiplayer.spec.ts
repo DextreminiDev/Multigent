@@ -48,7 +48,7 @@ test.describe.serial("three people in one chat", () => {
   });
 
   test("simultaneous sends are batched into one reply addressing each person", async () => {
-    await Promise.all([send(owner, "Olivia asks: plan the trip?"), send(editor, "Eddie asks: budget?")]);
+    await Promise.all([send(owner, "Olivia asks: plan the trip?", { ai: true }), send(editor, "Eddie asks: budget?", { ai: true })]);
 
     for (const p of [owner, editor, viewer]) {
       const reply = p.page.getByRole("article", { name: "Assistant said" }).last();
@@ -70,7 +70,7 @@ test.describe.serial("three people in one chat", () => {
 
   test("reconnecting mid-stream shows the full reply without gaps or repeats", async () => {
     const long = "Tell me everything. " + "Lorem ipsum dolor sit amet consectetur. ".repeat(25);
-    await send(editor, long);
+    await send(editor, long, { ai: true });
     await expect(viewer.page.getByRole("article", { name: "Assistant is replying" })).toBeVisible();
     await viewer.ctx.setOffline(true);
     await viewer.page.waitForTimeout(2500);
@@ -92,9 +92,9 @@ test.describe.serial("three people in one chat", () => {
   });
 
   test("messages sent while the AI is busy are queued and answered next", async () => {
-    await send(editor, "First: " + "words ".repeat(120));
+    await send(editor, "First: " + "words ".repeat(120), { ai: true });
     await expect(owner.page.getByRole("article", { name: "Assistant is replying" })).toBeVisible();
-    await send(owner, "Second, while busy");
+    await send(owner, "Second, while busy", { ai: true });
     await expect(
       owner.page.locator("article[data-msg-id]", { hasText: "Second, while busy" }),
     ).toContainText("Queued · will be answered next");

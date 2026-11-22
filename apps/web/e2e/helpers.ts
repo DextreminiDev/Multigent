@@ -56,9 +56,27 @@ export async function joinViaInvite(browser: Browser, link: string, name: string
   return { ctx, page, name };
 }
 
-export async function send(p: Person, text: string): Promise<void> {
+/** Pick someone from the composer's @ menu (inserts a mention chip). */
+export async function mention(p: Person, who: "AI" | "everyone" | string): Promise<void> {
   const box = p.page.getByRole("textbox", { name: "Message", exact: true });
-  await box.fill(text);
+  await box.pressSequentially("@");
+  await p.page.getByRole("option").filter({ hasText: who }).first().click();
+}
+
+/** Type and send a message. `ai` mentions the AI (the only way to get a reply),
+ *  `to` mentions people, `off` sends it off the record. */
+export async function send(
+  p: Person,
+  text: string,
+  opts: { ai?: boolean; to?: string[]; off?: boolean } = {},
+): Promise<void> {
+  const box = p.page.getByRole("textbox", { name: "Message", exact: true });
+  await box.fill("");
+  if (opts.off) await p.page.getByRole("button", { name: "Off the record" }).click();
+  if (opts.ai) await mention(p, "AI");
+  for (const who of opts.to ?? []) await mention(p, who);
+  await box.focus();
+  await p.page.keyboard.insertText(text);
   await box.press("Enter");
 }
 

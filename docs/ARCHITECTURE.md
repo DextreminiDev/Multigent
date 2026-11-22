@@ -122,7 +122,6 @@ chats(
   status text CHECK (status IN ('active','paused_key','paused_cap','archived')),
   last_seq bigint NOT NULL DEFAULT 0,          -- event counter, see §5
   daily_token_cap int NULL,
-  reply_mode text NOT NULL DEFAULT 'always' CHECK IN ('always','tags'),  -- §6.2b
   created_at, updated_at
 )
 
@@ -153,6 +152,7 @@ messages(
   status text CHECK IN ('pending','batched','done','failed','deleted','superseded'),
   turn_id NULL,                                 -- human: turn that consumed it; ai: turn that produced it
   intent text NULL CHECK IN ('reply','context','off'),  -- human only, §6.2b
+  mentions jsonb NOT NULL DEFAULT '[]',         -- ranges over content, §6.2b
   created_at,
   UNIQUE (chat_id, client_msg_id),
   UNIQUE (chat_id, seq)
@@ -253,21 +253,25 @@ sequenceDiagram
 - `ZADD NX` keeps the *earliest* due time, so later messages inside the debounce window do not push it back, and a burst of 3 people typing at once lands in one batch.
 - Debounce default 800 ms when idle. When a turn finishes and pending messages already exist, they are scheduled at `now` (they've already waited).
 
-### 6.2b Reply modes and tags
+### 6.2b Mentions and off the record
 
-Not every message should call the AI. Each human message gets an `intent` at send time from its tags and the chat's `reply_mode` (owner-only setting, `PATCH /chats/{id} {reply_mode}`), parsed by `app/messages/tags.py`:
+Not every message should call the AI. **The AI replies only to messages that mention it**, and **off-the-record messages are never shown to it**. There are no chat modes and no text tags.
 
-| Tag | Calls the AI | In the AI's context |
-|---|---|---|
-| `@ai` | yes (`reply`) | yes |
-| `@skip` | no (`context`) | yes |
-| `@off` | no (`off`) | **no** (humans only) |
-| none | `always` mode: yes · `tags` mode: no | yes |
+| Message | AI replies | AI sees it | `to=` in the prompt (§7.2) |
+|---|---|---|---|
+| no mentions, or `@everyone` | no | yes | `(everyone)` |
+| `@Bob` | no | yes | `Bob` |
+| `@AI` (+ anyone) | **yes** | yes | `(assistant)`, `(assistant), Bob` |
+| off the record | no | **no** | not in the prompt |
+| off the record + `@AI` | blocked by the composer; the server rejects it (`422 off_with_ai`) | | |
 
-- Tags are whole words, case-insensitive, anywhere in the text (`bob@ai.com` isn't one). With several tags the **most restrictive wins** (`@off` > `@skip` > `@ai`), so a message never spends tokens or reaches the model by accident. The text is stored as typed.
+- **Mentions are entities, not text** (like Telegram's `MessageEntity`): the content stays plain ("@Bob can you pay?") and `messages.mentions` lists ranges over it, `{type: ai|everyone|user, offset, length, user_id?, name?}`. Offsets are **UTF-16 code units**, as in the browser; `app/messages/mentions.py` converts before slicing. Mentions come only from the composer's @ menu, so typing "@ai" by hand is plain text, and nothing in the text needs escaping. `name` is the user's name at send time (for former members).
+- **Off the record** is a flag on the send (`off: true`), not part of the text.
+- **Server rules** (`normalize`, `intent_for`): bad mentions are **dropped**, leaving their text as plain text: out-of-range, overlapping, not starting at "@", the sender, or a user who isn't a current member. This covers the honest race of someone being removed between being picked and the send. Then off + an AI mention is rejected. Intent is `off` if off, else `reply` if the AI is mentioned, else `context`.
 - Only `reply` messages are inserted as `pending`, wake the scheduler, use the 6/min AI bucket and are subject to member caps. `context`/`off` messages are inserted as `done` (no turn ever claims them) and use a separate anti-spam bucket (`chatrate:{chat}:{user}`, 30/min).
-- The history query excludes `intent = 'off'`, so @off text never reaches a prompt, a summary or the cap estimate. `context` messages render with `to="group"` (§7.2) and the preamble tells the model to use them as context without answering them.
-- Changing the mode is not retroactive: earlier messages keep their intent. The web composer mirrors the parser (`src/lib/tags.ts`) to preview the effect before sending; the server stays the source of truth.
+- The history query excludes `intent = 'off'`, so off-the-record text never reaches a prompt, a summary or the cap estimate.
+- **History:** messages from before mentions existed keep their stored `intent`; a legacy `reply` row is rendered as `to="(assistant)"`. Migration 0005 dropped the earlier per-chat `reply_mode` (always/tags).
+- The web composer (`src/lib/mentions.ts`) tracks chips as ranges while you edit (editing inside a chip turns it into plain text), shows what sending will do, and highlights messages that mention you or `@everyone` (never your own).
 
 ### 6.3 Claiming and locking
 
@@ -368,7 +372,7 @@ messages:
 - Consecutive human messages (including all of the batch) are merged into **one** `user` message, in `seq` order, because Gemini and Anthropic require role alternation.
 - Assistant messages from `failed`/`cancelled`/`superseded` turns are excluded from history. A cancelled turn's batch still appears as human messages followed by no assistant reply; the builder merges them forward into the next user message.
 - `system_event` messages (join/leave) render as `<event>Carol joined</event>` inside the next user message.
-- Human messages that didn't ask the AI (`intent = 'context'`, §6.2b) carry `to="group"`; the model answers only the unmarked ones. `intent = 'off'` messages are never loaded.
+- Every human message carries `to="…"`, its recipients (§6.2b): `(assistant)` for the AI, `(everyone)` when nobody in particular was addressed, or participant labels. The special values are parenthesized because display names can't contain parentheses, so no human can collide with them and no names are reserved. Mentions in the text render as `@Label` (`@assistant` for the AI). The preamble says to reply only when `(assistant)` is a recipient, to treat every other message as part of the conversation (quote or count it when asked), and to recount earlier messages rather than reuse an old answer. Summaries keep who said what to whom. `intent = 'off'` messages are never loaded.
 - The history must start with a `user` message: summarization boundaries always fall on turn boundaries to guarantee this.
 
 ### 7.3 Provider quirks handled in the adapter, not the builder
@@ -566,7 +570,7 @@ class KeyVault(Protocol):
 - **Daily token cap** (per chat) and optional **per-member cap**. Day boundary: UTC (documented; per-owner timezone is a later improvement).
 - Enforcement: cheap **pre-check** at claim from Redis counters `usage:{chat}:{yyyy-mm-dd}[:{user}]` (rebuilt from `usage_events` if missing). If today's usage plus a rough input estimate would exceed the cap → don't start; chat → `paused_cap`, batch stays pending, `chat.updated {status: paused_cap, reason: daily_cap}` tells everyone. **Post-check** after each turn may flip the chat to `paused_cap`. The sweeper resumes `paused_cap` chats once usage is back under the cap (new UTC day, or the owner raised/removed it) and re-runs their queue.
 - **Per-member caps** are enforced at send time: a member over their daily allowance gets `403 member_cap` (the owner is never capped by their own key).
-- **Message rate limit:** per user per chat, a Redis token bucket (`msgrate:{chat}:{user}`, default 6/min with an equal burst) → `429 rate_limited` with the wait in the message. It applies only to messages that call the AI; messages that don't (§6.2b) use `chatrate:{chat}:{user}` (30/min). Per-member caps likewise block only AI-calling messages, so a capped member can still chat with `@skip`/`@off`. Idempotent retries of an already-saved `client_msg_id` don't consume a token.
+- **Message rate limit:** per user per chat, a Redis token bucket (`msgrate:{chat}:{user}`, default 6/min with an equal burst) → `429 rate_limited` with the wait in the message. It applies only to messages that call the AI; messages that don't (§6.2b) use `chatrate:{chat}:{user}` (30/min). Per-member caps likewise block only AI-calling messages, so a capped member can still chat as long as they don't mention the AI. Idempotent retries of an already-saved `client_msg_id` don't consume a token.
 - Owner panel (`GET /chats/{id}/usage`): today vs cap, last 7 days, tokens per member (today / week, incl. former members and summaries), estimated weekly cost when pricing is known, per-member cap inputs, RPM ceiling.
 
 ---
