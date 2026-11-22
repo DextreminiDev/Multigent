@@ -91,21 +91,34 @@ export function TaggedText({ text }: { text: string }) {
   );
 }
 
-/** Says why a human message got no reply: @skip/tags-mode context, or @off. */
-export function IntentBadge({ intent }: { intent: ChatMessage["intent"] }) {
-  if (intent === "context")
-    return (
-      <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <MessageSquareOff className="size-3" aria-hidden /> No reply · the AI can see this
-      </span>
-    );
-  if (intent === "off")
-    return (
-      <span className="mt-1 inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
-        <EyeOff className="size-3" aria-hidden /> Off the record · hidden from the AI
-      </span>
-    );
-  return null;
+/** A small icon next to the time saying the message got no reply on purpose.
+ *  @off is always marked (it's private from the AI). "No reply" is only marked when
+ *  it's the exception, i.e. in "reply to every message" mode. */
+export function IntentMark({
+  intent,
+  replyMode,
+}: {
+  intent: ChatMessage["intent"];
+  replyMode: "always" | "tags";
+}) {
+  const mark =
+    intent === "off"
+      ? { Icon: EyeOff, label: "Off the record: hidden from the AI" }
+      : intent === "context" && replyMode === "always"
+        ? { Icon: MessageSquareOff, label: "No reply: the AI can still see this" }
+        : null;
+  if (!mark) return null;
+  return (
+    <span
+      role="img"
+      aria-label={mark.label}
+      title={mark.label}
+      data-intent-mark={intent}
+      className="inline-flex self-center text-muted-foreground/70"
+    >
+      <mark.Icon className="size-3" aria-hidden />
+    </span>
+  );
 }
 
 function HumanMessage({
@@ -113,10 +126,12 @@ function HumanMessage({
   mine,
   queued,
   former,
+  replyMode,
   onDelete,
 }: {
   m: ChatMessage;
   mine: boolean;
+  replyMode: "always" | "tags";
   queued: "next" | "waiting" | null;
   former: boolean;
   onDelete?: () => void;
@@ -133,12 +148,12 @@ function HumanMessage({
           <span className="font-medium text-foreground/90">{mine ? "You" : m.author_name}</span>
           <time dateTime={m.created_at}>{time(m.created_at)}</time>
           {former && <span>(former member)</span>}
+          {m.status !== "deleted" && <IntentMark intent={m.intent} replyMode={replyMode} />}
         </div>
         <div
           className={cn(
             "whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[15px] leading-relaxed",
             mine ? "rounded-tr-sm bg-primary/15 text-foreground" : "rounded-tl-sm bg-muted",
-            m.intent === "off" && "border border-dashed border-amber-500/50",
           )}
         >
           {m.status === "deleted" ? (
@@ -147,7 +162,6 @@ function HumanMessage({
             <TaggedText text={m.content} />
           )}
         </div>
-        {m.status !== "deleted" && <IntentBadge intent={m.intent} />}
         {queued && (
           <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="size-3" aria-hidden />
@@ -297,6 +311,7 @@ export function MessageList({
   controls,
   header,
   empty,
+  replyMode = "always",
 }: {
   state: LiveState;
   meId: string;
@@ -309,6 +324,7 @@ export function MessageList({
   controls?: TurnControls;
   header?: React.ReactNode;
   empty: React.ReactNode;
+  replyMode?: "always" | "tags";
 }) {
   const items = useMemo(() => timeline(state), [state]);
   const scroller = useRef<HTMLDivElement>(null);
@@ -416,6 +432,7 @@ export function MessageList({
                     mine={m.author_id === meId}
                     queued={queued}
                     former={former}
+                    replyMode={replyMode}
                     onDelete={
                       controls && m.author_id === meId && m.status === "pending"
                         ? () => controls.onDelete(m.id)

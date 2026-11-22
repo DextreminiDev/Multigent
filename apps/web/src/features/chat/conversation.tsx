@@ -165,6 +165,7 @@ export function Conversation({
         controls={controls}
         header={header}
         empty={empty}
+        replyMode={chat.reply_mode ?? "always"}
       />
       <div className="shrink-0 px-4 pt-2 pb-3">
         {live.connection === "reconnecting" && (

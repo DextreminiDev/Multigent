@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "@/lib/api/client";
 import { parseIntent, splitTags, tagQueryAt, tagsIn } from "@/lib/tags";
 import { Composer } from "./composer";
-import { IntentBadge, TaggedText } from "./message-list";
+import { IntentMark, TaggedText } from "./message-list";
 
 describe("parseIntent (mirrors the server)", () => {
   const cases: [string, string, string][] = [
@@ -96,14 +96,18 @@ describe("Composer tags", () => {
 });
 
 describe("Message tags in the list", () => {
-  it("highlights tags and explains no-reply messages", () => {
+  it("highlights tags and marks no-reply messages with a quiet icon", () => {
     const { container } = render(<TaggedText text="@off see you at 6" />);
     expect(container.querySelector('[data-tag="off"]')).toHaveTextContent("@off");
-    render(<IntentBadge intent={"off" as ChatMessage["intent"]} />);
-    expect(screen.getByText(/hidden from the AI/)).toBeInTheDocument();
-    render(<IntentBadge intent="context" />);
-    expect(screen.getByText(/No reply/)).toBeInTheDocument();
-    const { container: none } = render(<IntentBadge intent="reply" />);
+
+    render(<IntentMark intent={"off" as ChatMessage["intent"]} replyMode="tags" />);
+    expect(screen.getByRole("img", { name: /hidden from the AI/ })).toBeInTheDocument();
+    render(<IntentMark intent="context" replyMode="always" />);
+    expect(screen.getByRole("img", { name: /No reply/ })).toBeInTheDocument();
+    // in tags mode "no reply" is the norm, so it isn't marked
+    const { container: tagsCtx } = render(<IntentMark intent="context" replyMode="tags" />);
+    expect(tagsCtx).toBeEmptyDOMElement();
+    const { container: none } = render(<IntentMark intent="reply" replyMode="always" />);
     expect(none).toBeEmptyDOMElement();
   });
 });

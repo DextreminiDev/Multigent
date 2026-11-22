@@ -32,10 +32,20 @@ test.describe.serial("reply modes and tags", () => {
     for (const p of [owner, editor]) {
       await expect(
         p.page.locator("article[data-msg-id]", { hasText: "hotel is booked" }),
-      ).toContainText("No reply · the AI can see this");
+      ).toContainText("hotel is booked"); // no clutter: just an icon by the time
+      await expect(
+        p.page
+          .locator("article[data-msg-id]", { hasText: "hotel is booked" })
+          .getByRole("img", { name: "No reply: the AI can still see this" }),
+      ).toBeVisible();
       await expect(
         p.page.locator("article[data-msg-id]", { hasText: "door code" }),
-      ).toContainText("Off the record · hidden from the AI");
+      ).toContainText("door code");
+      await expect(
+        p.page
+          .locator("article[data-msg-id]", { hasText: "door code" })
+          .getByRole("img", { name: "Off the record: hidden from the AI" }),
+      ).toBeVisible();
     }
     await owner.page.waitForTimeout(1500); // longer than the debounce: nothing should start
     await expect(assistant(owner)).toHaveCount(0);
@@ -48,9 +58,9 @@ test.describe.serial("reply modes and tags", () => {
     ).toHaveAttribute("placeholder", /add @ai/);
 
     await send(editor, "anyone up for dinner?");
-    await expect(
-      owner.page.locator("article[data-msg-id]", { hasText: "dinner?" }),
-    ).toContainText("No reply");
+    const dinner = owner.page.locator("article[data-msg-id]", { hasText: "dinner?" });
+    await expect(dinner).toBeVisible();
+    await expect(dinner.getByRole("img", { name: /No reply/ })).toHaveCount(0); // the norm here
 
     // pick @ai from the suggestions with the keyboard
     const box = editor.page.getByRole("textbox", { name: "Message", exact: true });
