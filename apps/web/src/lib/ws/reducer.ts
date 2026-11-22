@@ -8,6 +8,7 @@
  *    by (turn_id, idx), so snapshot/live overlap after a mid-stream join is harmless.
  *  - messages render by `anchor_seq` (AI replies sit where their turn started).
  */
+import type { Mention } from "@/lib/mentions";
 import type { ChatMessage } from "@/lib/api/client";
 
 export type ServerEvent = {
@@ -44,6 +45,8 @@ export type FailedTurn = {
 export type PendingSend = {
   clientMsgId: string;
   content: string;
+  mentions?: Mention[];
+  off?: boolean;
   createdAt: string;
   state: "sending" | "failed";
   error?: string;

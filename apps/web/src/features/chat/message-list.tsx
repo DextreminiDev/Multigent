@@ -5,7 +5,6 @@ import {
   ArrowDown,
   Clock,
   EyeOff,
-  MessageSquareOff,
   RefreshCw,
   RotateCw,
   Sparkles,
@@ -21,7 +20,7 @@ import type { ChatMessage } from "@/lib/api/client";
 import type { FailedTurn, LiveState, LiveTurn, PendingSend, TurnStatus } from "@/lib/ws/reducer";
 import { TurnStatusLine } from "./limits";
 import { lastAiMessageId, timeline, turnAuthorIds } from "@/lib/ws/reducer";
-import { splitTags } from "@/lib/tags";
+import { mentionsMe, segments, type Mention } from "@/lib/mentions";
 import { cn } from "@/lib/utils";
 
 function time(iso: string | null | undefined): string {
@@ -74,49 +73,55 @@ function AiFrame({
   );
 }
 
-/** Message text with @ai / @skip / @off rendered as tag chips. */
-export function TaggedText({ text }: { text: string }) {
+/** Message text with mentions rendered as chips. A person's chip shows their
+ *  current name when they're still a member, else the name stored at send time. */
+export function MessageText({
+  text,
+  mentions,
+  nameOf,
+}: {
+  text: string;
+  mentions?: readonly Mention[] | null;
+  nameOf?: (userId: string) => string | undefined;
+}) {
   return (
     <>
-      {splitTags(text).map((seg, i) =>
-        seg.tag ? (
-          <span key={i} data-tag={seg.tag} className="rounded bg-foreground/10 px-1 font-medium text-foreground">
-            {seg.text}
+      {segments(text, mentions).map((seg, i) => {
+        const m = seg.mention;
+        if (!m) return seg.text;
+        const label =
+          m.type === "user"
+            ? `@${(m.user_id && nameOf?.(m.user_id)) || m.name || seg.text.slice(1)}`
+            : seg.text;
+        return (
+          <span
+            key={i}
+            data-mention={m.type}
+            className={cn(
+              "rounded px-0.5 font-medium",
+              m.type === "ai" ? "bg-primary/15 text-primary" : "bg-foreground/10 text-foreground",
+            )}
+          >
+            {label}
           </span>
-        ) : (
-          seg.text
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
 
-/** A small icon next to the time saying the message got no reply on purpose.
- *  @off is always marked (it's private from the AI). "No reply" is only marked when
- *  it's the exception, i.e. in "reply to every message" mode. */
-export function IntentMark({
-  intent,
-  replyMode,
-}: {
-  intent: ChatMessage["intent"];
-  replyMode: "always" | "tags";
-}) {
-  const mark =
-    intent === "off"
-      ? { Icon: EyeOff, label: "Off the record: hidden from the AI" }
-      : intent === "context" && replyMode === "always"
-        ? { Icon: MessageSquareOff, label: "No reply: the AI can still see this" }
-        : null;
-  if (!mark) return null;
+/** A small icon next to the time for off-the-record messages (hidden from the AI). */
+export function OffMark() {
+  const label = "Off the record: hidden from the AI";
   return (
     <span
       role="img"
-      aria-label={mark.label}
-      title={mark.label}
-      data-intent-mark={intent}
+      aria-label={label}
+      title={label}
+      data-intent-mark="off"
       className="inline-flex self-center text-muted-foreground/70"
     >
-      <mark.Icon className="size-3" aria-hidden />
+      <EyeOff className="size-3" aria-hidden />
     </span>
   );
 }
@@ -126,19 +131,23 @@ function HumanMessage({
   mine,
   queued,
   former,
-  replyMode,
+  meId,
+  nameOf,
   onDelete,
 }: {
   m: ChatMessage;
   mine: boolean;
-  replyMode: "always" | "tags";
+  meId: string;
+  nameOf?: (userId: string) => string | undefined;
   queued: "next" | "waiting" | null;
   former: boolean;
   onDelete?: () => void;
 }) {
+  const forMe = m.status !== "deleted" && mentionsMe(m.mentions, m.author_id, meId);
   return (
     <article
       aria-label={`${m.author_name ?? "Someone"} said`}
+      data-mentions-me={forMe || undefined}
       data-msg-id={m.id}
       className={cn("flex gap-3 py-2", mine && "flex-row-reverse")}
     >
@@ -148,18 +157,21 @@ function HumanMessage({
           <span className="font-medium text-foreground/90">{mine ? "You" : m.author_name}</span>
           <time dateTime={m.created_at}>{time(m.created_at)}</time>
           {former && <span>(former member)</span>}
-          {m.status !== "deleted" && <IntentMark intent={m.intent} replyMode={replyMode} />}
+          {m.status !== "deleted" && m.intent === "off" && <OffMark />}
+          {forMe && <span className="sr-only">Mentions you</span>}
         </div>
         <div
           className={cn(
             "whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[15px] leading-relaxed",
             mine ? "rounded-tr-sm bg-primary/15 text-foreground" : "rounded-tl-sm bg-muted",
+            // a very light accent when the message mentions you (or @everyone)
+            forMe && "bg-primary/[0.07] shadow-[inset_2px_0_0_0] shadow-primary/50",
           )}
         >
           {m.status === "deleted" ? (
             <em className="text-muted-foreground">Message deleted</em>
           ) : (
-            <TaggedText text={m.content} />
+            <MessageText text={m.content} mentions={m.mentions} nameOf={nameOf} />
           )}
         </div>
         {queued && (
@@ -197,7 +209,7 @@ function SendingMessage({
       <span className="size-7 shrink-0" aria-hidden />
       <div className="flex max-w-[85%] flex-col items-end">
         <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-primary/10 px-3.5 py-2 text-[15px]">
-          <TaggedText text={p.content} />
+          <MessageText text={p.content} mentions={p.mentions} />
         </div>
         {p.state === "sending" ? (
           <span className="mt-1 text-xs text-muted-foreground">Sending…</span>
@@ -311,7 +323,7 @@ export function MessageList({
   controls,
   header,
   empty,
-  replyMode = "always",
+  nameOf,
 }: {
   state: LiveState;
   meId: string;
@@ -324,7 +336,8 @@ export function MessageList({
   controls?: TurnControls;
   header?: React.ReactNode;
   empty: React.ReactNode;
-  replyMode?: "always" | "tags";
+  /** current display name of a member (for mention chips) */
+  nameOf?: (userId: string) => string | undefined;
 }) {
   const items = useMemo(() => timeline(state), [state]);
   const scroller = useRef<HTMLDivElement>(null);
@@ -432,7 +445,8 @@ export function MessageList({
                     mine={m.author_id === meId}
                     queued={queued}
                     former={former}
-                    replyMode={replyMode}
+                    meId={meId}
+                    nameOf={nameOf}
                     onDelete={
                       controls && m.author_id === meId && m.status === "pending"
                         ? () => controls.onDelete(m.id)

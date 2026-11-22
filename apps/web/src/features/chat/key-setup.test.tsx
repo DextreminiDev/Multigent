@@ -41,7 +41,6 @@ function chat(over: Partial<Chat> = {}): Chat {
     last_seq: 1,
     created_at: "",
     updated_at: "",
-    reply_mode: "always",
     ...over,
   };
 }

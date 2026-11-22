@@ -3,14 +3,16 @@
 import { KeyRound, Loader2, MessageSquareDashed, Square, WifiOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Chat } from "@/lib/api/client";
+import type { Person } from "@/lib/mentions";
 import {
   qk,
   useCancelTurn,
   useDeletePending,
+  useMembers,
   useRegenerate,
   useRetryTurn,
 } from "@/lib/api/hooks";
@@ -90,6 +92,16 @@ export function Conversation({
   const retry = useRetryTurn(chat.id);
   const regenerate = useRegenerate(chat.id);
   const del = useDeletePending(chat.id);
+  const members = useMembers(chat.id);
+  const people = useMemo<Person[]>(
+    () =>
+      (members.data ?? []).map((p) => ({ id: p.user_id, name: p.name, color: p.avatar_color })),
+    [members.data],
+  );
+  const nameOf = useCallback(
+    (id: string) => people.find((p) => p.id === id)?.name,
+    [people],
+  );
   const isOwner = chat.role === "owner";
   const onError = (e: Error) => toast.error(e.message);
   const controls: TurnControls = {
@@ -144,9 +156,8 @@ export function Conversation({
         <MessageSquareDashed className="mx-auto size-8 text-muted-foreground" aria-hidden />
         <p className="font-medium">No messages yet</p>
         <p className="text-sm text-muted-foreground">
-          {chat.reply_mode === "tags"
-            ? "Say hi. Everyone sees the conversation live. The AI only replies to messages tagged @ai, but it reads along."
-            : "Say hi. Everyone in the chat sees the conversation live, and the AI answers each person by name."}
+          Say hi. Everyone sees the conversation live. Mention @AI when you want it to answer; it
+          reads along either way.
         </p>
       </div>
     </div>
@@ -165,7 +176,7 @@ export function Conversation({
         controls={controls}
         header={header}
         empty={empty}
-        replyMode={chat.reply_mode ?? "always"}
+        nameOf={nameOf}
       />
       <div className="shrink-0 px-4 pt-2 pb-3">
         {live.connection === "reconnecting" && (
@@ -200,7 +211,8 @@ export function Conversation({
             onSend={live.send}
             onType={live.notifyTyping}
             disabledReason={blocked}
-            replyMode={chat.reply_mode ?? "always"}
+            people={people}
+            meId={meId}
           />
         </div>
       </div>

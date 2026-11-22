@@ -122,7 +122,7 @@ function chat(role: Chat["role"]): Chat {
   return {
     id: "c1", title: "T", role, owner: { id: "o", name: "Alice", avatar_color: "#000" },
     status: "active", provider: "fake", model: "m", max_output_tokens: 1, member_count: 2,
-    key: null, last_seq: 1, created_at: "", updated_at: "", reply_mode: "always",
+    key: null, last_seq: 1, created_at: "", updated_at: "",
   };
 }
 

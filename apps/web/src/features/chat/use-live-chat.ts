@@ -17,6 +17,7 @@ import {
   type ServerEvent,
 } from "@/lib/ws/reducer";
 import type { ChatMessage } from "@/lib/api/client";
+import type { Mention } from "@/lib/mentions";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -30,7 +31,7 @@ export type LiveChat = {
   state: LiveState | null;
   error: string | null;
   connection: ConnStatus;
-  send: (content: string) => void;
+  send: (content: string, mentions?: Mention[], off?: boolean) => void;
   retrySend: (clientMsgId: string) => void;
   discardSend: (clientMsgId: string) => void;
   /** call on composer input; throttled to one frame per 2 s */
@@ -123,9 +124,9 @@ export function useLiveChat(chatId: string): LiveChat {
   }, [state?.needsResync, load, client, chatId]);
 
   const transmit = useCallback(
-    (clientMsgId: string, content: string) => {
+    (clientMsgId: string, content: string, mentions: Mention[], off: boolean) => {
       client
-        .sendMessage(chatId, clientMsgId, content)
+        .sendMessage(chatId, clientMsgId, content, mentions, off)
         .then((ack) => {
           if (ref.current) commit(ackSend(ref.current, ack.message as ChatMessage));
         })
@@ -139,7 +140,7 @@ export function useLiveChat(chatId: string): LiveChat {
   );
 
   const send = useCallback(
-    (content: string) => {
+    (content: string, mentions: Mention[] = [], off = false) => {
       if (!ref.current) return;
       const clientMsgId = newId();
       lastTyping.current = 0;
@@ -147,11 +148,13 @@ export function useLiveChat(chatId: string): LiveChat {
         addPendingSend(ref.current, {
           clientMsgId,
           content,
+          mentions,
+          off,
           createdAt: new Date().toISOString(),
           state: "sending",
         }),
       );
-      transmit(clientMsgId, content);
+      transmit(clientMsgId, content, mentions, off);
     },
     [commit, transmit],
   );
@@ -161,7 +164,7 @@ export function useLiveChat(chatId: string): LiveChat {
       const p = ref.current?.pendingSends[clientMsgId];
       if (!p || !ref.current) return;
       commit(addPendingSend(ref.current, { ...p, state: "sending", error: undefined }));
-      transmit(clientMsgId, p.content); // same id: the server dedupes
+      transmit(clientMsgId, p.content, p.mentions ?? [], p.off ?? false); // same id: deduped
     },
     [commit, transmit],
   );

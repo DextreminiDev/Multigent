@@ -120,7 +120,6 @@ export type ChatPatch = {
   max_output_tokens?: number;
   daily_token_cap?: number | null;
   rpm_limit?: number | null;
-  reply_mode?: "always" | "tags";
 };
 
 export function usePatchChat(id: string) {

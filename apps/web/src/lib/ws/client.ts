@@ -9,6 +9,7 @@
  * - Outbox: `message.send` frames stay queued until acked and are re-sent after a
  *   reconnect. The server dedupes on `client_msg_id`, so this is safe.
  */
+import type { Mention } from "@/lib/mentions";
 import type { ServerEvent } from "./reducer";
 
 export type ConnStatus = "idle" | "connecting" | "open" | "reconnecting";
@@ -203,10 +204,25 @@ export class WsClient {
   }
 
   /** Send a message; survives reconnects until the server acks it. */
-  sendMessage(chatId: string, clientMsgId: string, content: string): Promise<Ack> {
+  sendMessage(
+    chatId: string,
+    clientMsgId: string,
+    content: string,
+    mentions: Mention[] = [],
+    off = false,
+  ): Promise<Ack> {
     return new Promise<Ack>((resolve, reject) => {
       const pending: Pending = { resolve, reject, send: clientMsgId };
-      const frame = { type: "message.send", chat_id: chatId, client_msg_id: clientMsgId, content };
+      const frame = {
+        type: "message.send",
+        chat_id: chatId,
+        client_msg_id: clientMsgId,
+        content,
+        mentions: mentions.map(({ type, offset, length, user_id }) =>
+          user_id ? { type, offset, length, user_id } : { type, offset, length },
+        ),
+        off,
+      };
       this.outbox.set(clientMsgId, { frame, pending });
       if (!this.transmit(frame, pending)) this.connect();
     });

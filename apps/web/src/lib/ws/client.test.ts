@@ -79,6 +79,31 @@ describe("WsClient", () => {
     expect(c.getStatus()).toBe("open");
   });
 
+  it("sends mentions and the off-the-record flag, and re-sends them unchanged", () => {
+    const c = new WsClient("ws://x/ws", factory, () => 0.5);
+    c.subscribe("c1", () => 0, () => {});
+    latest().open();
+    void c.sendMessage(
+      "c1",
+      "m1",
+      "@Bob hi",
+      [{ type: "user", offset: 0, length: 4, user_id: "u2", name: "Bob" }],
+      true,
+    );
+    const frame = latest().last("message.send");
+    // the server sets names; the client only sends the range and who
+    expect(frame).toMatchObject({
+      content: "@Bob hi",
+      mentions: [{ type: "user", offset: 0, length: 4, user_id: "u2" }],
+      off: true,
+    });
+    expect((frame.mentions as Record<string, unknown>[])[0]).not.toHaveProperty("name");
+    latest().drop();
+    vi.advanceTimersByTime(1000);
+    latest().open();
+    expect(latest().last("message.send")).toMatchObject({ off: true, mentions: frame.mentions });
+  });
+
   it("re-sends unacked messages after reconnect and resolves on ack", async () => {
     const c = new WsClient("ws://x/ws", factory, () => 0.5);
     c.subscribe("c1", () => 0, () => {});

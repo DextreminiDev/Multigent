@@ -15,7 +15,7 @@ describe("Composer", () => {
     fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("hello\nworld");
+    expect(onSend).toHaveBeenCalledWith("hello\nworld", [], false);
     expect(box).toHaveValue("");
   });
 
