@@ -145,13 +145,18 @@ return {ok, tostring(wait)}
 
 
 async def take_message_token(
-    redis: Redis, chat_id: uuid.UUID, user_id: uuid.UUID, per_minute: int
+    redis: Redis,
+    chat_id: uuid.UUID,
+    user_id: uuid.UUID,
+    per_minute: int,
+    *,
+    bucket: str = "msgrate",
 ) -> float | None:
     """Token bucket per user per chat (burst = per_minute). None if allowed, else
     seconds until the next message is allowed."""
     import time
 
     ok, wait = await redis.eval(
-        _BUCKET, 1, f"msgrate:{chat_id}:{user_id}", per_minute, per_minute / 60.0, time.time()
+        _BUCKET, 1, f"{bucket}:{chat_id}:{user_id}", per_minute, per_minute / 60.0, time.time()
     )
     return None if int(ok) == 1 else float(wait)

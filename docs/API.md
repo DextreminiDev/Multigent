@@ -14,7 +14,7 @@ The REST API is described by its OpenAPI schema: [`apps/web/openapi.json`](../ap
 | Area | Endpoints |
 |---|---|
 | Auth | `GET /auth/providers`, `GET /auth/{google,github}/login`, `GET /auth/{provider}/callback`, `POST /auth/dev/login` (dev only), `POST /auth/logout`, `GET /me`, `DELETE /me` |
-| Chats | `POST /chats`, `GET /chats`, `GET /chats/{id}`, `PATCH /chats/{id}`, `DELETE /chats/{id}` |
+| Chats | `POST /chats`, `GET /chats`, `GET /chats/{id}`, `PATCH /chats/{id}` (owner: title, instructions, model, caps, `reply_mode`: `always` or `tags`), `DELETE /chats/{id}` |
 | Messages | `GET /chats/{id}/state` (consistent snapshot for subscribing), `GET /chats/{id}/messages?before_seq=&limit=`, `POST /chats/{id}/messages`, `DELETE /chats/{id}/messages/{msg_id}` (own, still queued) |
 | Turn controls | `POST /chats/{id}/turns/{turn_id}/cancel`, `POST /chats/{id}/turns/{turn_id}/retry`, `POST /chats/{id}/messages/{ai_id}/regenerate` |
 | Key slot | `PUT /chats/{id}/key` (write-only), `DELETE /chats/{id}/key`, `POST /chats/{id}/key/validate`, `GET /chats/{id}/models`, `GET /providers` |
@@ -47,7 +47,7 @@ Persisted events carry a per-chat `seq` (strictly increasing, gapless). Clients 
 |---|---|---|
 | `chat.created`, `chat.updated` | yes | public chat fields that changed, `status` |
 | `key.status` | yes | `status` (`ok`/`invalid`/`missing`…), `chat_status` |
-| `message.created` | yes | `message` (with `anchor_seq`, `client_msg_id`) |
+| `message.created` | yes | `message` (with `anchor_seq`, `client_msg_id`, and `intent` for human messages: `reply`, `context` or `off`) |
 | `message.updated` | yes | `message` (e.g. a queued message deleted by its author) |
 | `message.superseded` | yes | `message_id`, `message_ids` re-queued (regenerate) |
 | `member.updated` | yes | `member` (`user_id`, `name`, `role`, `removed`) |

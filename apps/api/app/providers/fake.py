@@ -32,7 +32,8 @@ from app.providers.base import (
 )
 from app.providers.errors import AuthError, ContentBlocked, ProviderError, RateLimitError
 
-_TAG = re.compile(r'<message from="([^"]*)"[^>]*>\n(.*?)\n</message>', re.S)
+# messages addressed to the AI (to="group" ones are context, like a real model treats them)
+_TAG = re.compile(r'<message from="([^"]*)"(?![^>]*to="group")[^>]*>\n(.*?)\n</message>', re.S)
 
 
 @dataclass

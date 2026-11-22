@@ -7,6 +7,7 @@
 **Highlights**
 
 - **Multiplayer by design:** invites with roles (owner / editor / viewer), presence, typing indicators, live member changes.
+- **Talk without always calling the AI:** the owner picks whether the AI replies to every message or only to ones tagged `@ai`. In either mode, `@skip` sends a message the AI reads but doesn't answer, and `@off` keeps a message between humans only (the model never sees it). The composer shows what a message will do before you send it.
 - **Correct under concurrency:** a strict per-chat event order, at most one reply running per chat, simultaneous messages batched into one reply, nothing lost or answered twice, even if a worker is killed mid-reply.
 - **The owner's key stays secret:** encrypted at rest, write-only, decrypted only for the provider call, and never in any response, event, log or error. A test proves it.
 - **Works with a free Gemini key:** rate-limit aware (backoff with a live countdown, request pacing), rolling summaries for long chats, spend caps.

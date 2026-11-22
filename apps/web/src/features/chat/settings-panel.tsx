@@ -15,6 +15,8 @@ import { useDeleteChat, usePatchChat, type ChatPatch } from "@/lib/api/hooks";
 import { KeySetup, ModelPicker } from "./key-setup";
 import { RpmField, UsagePanel } from "./limits";
 import { isChatReady } from "./setup-checklist";
+import type { ReplyMode } from "@/lib/tags";
+import { cn } from "@/lib/utils";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -29,12 +31,75 @@ function useSave(chat: Chat) {
   const patch = usePatchChat(chat.id);
   return {
     pending: patch.isPending,
-    save: (body: ChatPatch, ok = "Saved") =>
+    save: (body: ChatPatch, ok = "Saved", onFail?: () => void) =>
       patch.mutate(body, {
         onSuccess: () => toast.success(ok),
-        onError: (e) => toast.error(e.message),
+        onError: (e) => {
+          toast.error(e.message);
+          onFail?.();
+        },
       }),
   };
+}
+
+const MODES: { value: ReplyMode; title: string; body: string }[] = [
+  {
+    value: "always",
+    title: "Reply to every message",
+    body: "Add @skip to say something without a reply.",
+  },
+  {
+    value: "tags",
+    title: "Only when tagged @ai",
+    body: "Everything else is just chat; the AI still reads it as context.",
+  },
+];
+
+function ReplyModeField({
+  chat,
+  onSave,
+}: {
+  chat: Chat;
+  onSave: (v: ReplyMode, onFail: () => void) => void;
+}) {
+  const saved = chat.reply_mode ?? "always";
+  // move the radio immediately; the server's value wins once the chat refetches
+  const [current, setCurrent] = useState<ReplyMode>(saved);
+  useEffect(() => setCurrent(saved), [saved]);
+  return (
+    <fieldset className="space-y-2">
+      <legend className="sr-only">When the AI replies</legend>
+      {MODES.map((m) => (
+        <label
+          key={m.value}
+          className={cn(
+            "flex cursor-pointer gap-3 rounded-lg border p-3 text-sm has-focus-visible:ring-3 has-focus-visible:ring-ring/40",
+            current === m.value && "border-primary bg-primary/5",
+          )}
+        >
+          <input
+            type="radio"
+            name="reply-mode"
+            value={m.value}
+            checked={current === m.value}
+            onChange={() => {
+              setCurrent(m.value);
+              onSave(m.value, () => setCurrent(saved));
+            }}
+            className="mt-0.5 accent-primary"
+          />
+          <span>
+            <span className="block font-medium">{m.title}</span>
+            <span className="block text-xs text-muted-foreground">{m.body}</span>
+          </span>
+        </label>
+      ))}
+      <p className="text-xs text-muted-foreground">
+        In both modes, anyone can use @ai to get a reply, @skip for no reply, or @off to keep a
+        message hidden from the AI.
+      </p>
+    </fieldset>
+  );
 }
 
 function OwnerSettings({ chat }: { chat: Chat }) {
@@ -101,6 +166,11 @@ function OwnerSettings({ chat }: { chat: Chat }) {
             </Button>
           </div>
         </form>
+      </Section>
+
+      <Separator />
+      <Section title="AI replies">
+        <ReplyModeField chat={chat} onSave={(v, onFail) => save({ reply_mode: v }, "Reply mode saved", onFail)} />
       </Section>
 
       <Separator />
@@ -229,6 +299,8 @@ function CollaboratorInfo({ chat }: { chat: Chat }) {
         <dd>{chat.model ?? "Not chosen yet"}</dd>
         <dt className="text-muted-foreground">Members</dt>
         <dd>{chat.member_count}</dd>
+        <dt className="text-muted-foreground">AI replies</dt>
+        <dd>{chat.reply_mode === "tags" ? "Only to @ai messages" : "To every message"}</dd>
       </dl>
       <p className="flex gap-2 rounded-lg bg-muted p-3 text-muted-foreground">
         <Info className="mt-0.5 size-4 shrink-0" />

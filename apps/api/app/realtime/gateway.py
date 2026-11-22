@@ -342,6 +342,7 @@ async def _send(conn: Connection, msg: SendIn) -> None:
             content=msg.content,
             debounce_ms=app.state.settings.debounce_ms,
             rate_per_min=app.state.settings.message_rate_per_min,
+            chat_rate_per_min=app.state.settings.chat_rate_per_min,
         )
     conn.send(
         {

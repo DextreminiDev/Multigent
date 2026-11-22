@@ -22,6 +22,7 @@ from app.db.models import Message, User
 from app.errors import ApiError
 from app.events import Outbox, allocate_seq
 from app.ids import uuid7
+from app.messages.tags import parse_intent
 from app.turns.schedule import wake
 from app.usage.service import take_message_token, tokens_used
 from app.users.names import avatar_color
@@ -44,6 +45,7 @@ def message_payload(
         "author_color": avatar_color(m.author_id) if m.author_id else None,
         "content": "" if m.status == "deleted" else m.content,
         "status": m.status,
+        "intent": m.intent,
         "turn_id": str(m.turn_id) if m.turn_id else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
@@ -84,12 +86,23 @@ async def send_message(
     content: str,
     debounce_ms: int,
     rate_per_min: int = 6,
+    chat_rate_per_min: int = 30,
 ) -> SendResult:
+    """Intent comes from the tags and the chat's reply mode (app/messages/tags.py).
+    Only "reply" messages wake the turn engine and use the AI rate limit and the
+    member's token cap; "context"/"off" messages are stored as done right away."""
     content = validate_content(content)
     m = await require(db, chat_id, user.id, Action.SEND)
     if (prior := await _existing(db, chat_id, client_msg_id)) is not None:
         return SendResult(prior, created=False)  # retries never cost a rate-limit token
-    wait = await take_message_token(redis, chat_id, user.id, rate_per_min)
+    intent = parse_intent(content, m.chat.reply_mode)
+    asks_ai = intent == "reply"
+    if asks_ai:
+        wait = await take_message_token(redis, chat_id, user.id, rate_per_min)
+    else:
+        wait = await take_message_token(
+            redis, chat_id, user.id, chat_rate_per_min, bucket="chatrate"
+        )
     if wait is not None:
         raise ApiError(
             429,
@@ -97,11 +110,12 @@ async def send_message(
             f"You're sending messages too fast. Try again in {max(1, round(wait))}s.",
         )
     cap = m.member.member_token_cap
-    if cap and await tokens_used(redis, db, chat_id, user_id=user.id) >= cap:
+    if asks_ai and cap and await tokens_used(redis, db, chat_id, user_id=user.id) >= cap:
         raise ApiError(
             403,
             "member_cap",
-            "You've used your daily token allowance in this chat. It resets at 00:00 UTC.",
+            "You've used your daily token allowance in this chat. It resets at 00:00 UTC."
+            " You can still chat with @skip or @off.",
         )
 
     outbox = Outbox()
@@ -117,7 +131,8 @@ async def send_message(
             author_name_snapshot=user.name,
             content=content,
             client_msg_id=client_msg_id,
-            status="pending",
+            status="pending" if asks_ai else "done",
+            intent=intent,
             created_at=dt.datetime.now(dt.UTC),
         )
         db.add(msg)
@@ -132,7 +147,8 @@ async def send_message(
         return SendResult(prior, created=False)
 
     await outbox.publish(redis)
-    await wake(redis, chat_id, debounce_ms)
+    if asks_ai:
+        await wake(redis, chat_id, debounce_ms)
     return SendResult(msg, created=True)
 
 

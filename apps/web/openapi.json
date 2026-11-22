@@ -123,6 +123,21 @@
             ],
             "title": "Model"
           },
+          "reply_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "always",
+                  "tags"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply Mode"
+          },
           "rpm_limit": {
             "anyOf": [
               {
@@ -319,6 +334,15 @@
               }
             ],
             "title": "Provider"
+          },
+          "reply_mode": {
+            "default": "always",
+            "enum": [
+              "always",
+              "tags"
+            ],
+            "title": "Reply Mode",
+            "type": "string"
           },
           "role": {
             "enum": [
@@ -1058,6 +1082,22 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "enum": [
+                  "reply",
+                  "context",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
           },
           "kind": {
             "enum": [

@@ -152,7 +152,9 @@ async def patch_chat(
         if m.chat.status == "paused_cap" and "daily_token_cap" in changed:
             m.chat.status = "active"  # the cap check re-pauses if still exceeded
         public: dict[str, object] = {
-            f: getattr(m.chat, f) for f in ("title", "model", "max_output_tokens") if f in changed
+            f: getattr(m.chat, f)
+            for f in ("title", "model", "max_output_tokens", "reply_mode")
+            if f in changed
         }
         if "limits" in changed:
             public.update(context_window=m.chat.context_window,

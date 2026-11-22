@@ -291,6 +291,7 @@ class TurnRunner:
             select(func.coalesce(func.sum(func.length(Message.content)), 0)).where(
                 Message.chat_id == chat.id,
                 Message.status.not_in(("deleted", "superseded")),
+                Message.intent.is_distinct_from("off"),
             )
         )
         window = chat.context_window or 32_000
@@ -430,6 +431,7 @@ class TurnRunner:
                         Message.chat_id == chat_id,
                         Message.status.not_in(("deleted", "superseded", "pending")),
                         ~((Message.kind == "ai") & (Message.status != "done")),
+                        Message.intent.is_distinct_from("off"),  # humans-only
                     )
                     .order_by(Message.seq.desc())
                     .limit(HISTORY_LIMIT)
@@ -444,6 +446,7 @@ class TurnRunner:
                     author_id=m.author_id,
                     author_name=m.author_name_snapshot,
                     anchor=anchor,
+                    to_ai=m.intent != "context",
                 )
                 for m, anchor in reversed(rows)
             ]

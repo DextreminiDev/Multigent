@@ -144,8 +144,9 @@ export function Conversation({
         <MessageSquareDashed className="mx-auto size-8 text-muted-foreground" aria-hidden />
         <p className="font-medium">No messages yet</p>
         <p className="text-sm text-muted-foreground">
-          Say hi. Everyone in the chat sees the conversation live, and the AI answers each person by
-          name.
+          {chat.reply_mode === "tags"
+            ? "Say hi. Everyone sees the conversation live. The AI only replies to messages tagged @ai, but it reads along."
+            : "Say hi. Everyone in the chat sees the conversation live, and the AI answers each person by name."}
         </p>
       </div>
     </div>
@@ -198,7 +199,7 @@ export function Conversation({
             onSend={live.send}
             onType={live.notifyTyping}
             disabledReason={blocked}
-            hint={chat.role !== "owner" ? "Replies use the owner's key, even when they're offline." : null}
+            replyMode={chat.reply_mode ?? "always"}
           />
         </div>
       </div>

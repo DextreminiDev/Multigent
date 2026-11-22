@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   ArrowDown,
   Clock,
+  EyeOff,
+  MessageSquareOff,
   RefreshCw,
   RotateCw,
   Sparkles,
@@ -19,6 +21,7 @@ import type { ChatMessage } from "@/lib/api/client";
 import type { FailedTurn, LiveState, LiveTurn, PendingSend, TurnStatus } from "@/lib/ws/reducer";
 import { TurnStatusLine } from "./limits";
 import { lastAiMessageId, timeline, turnAuthorIds } from "@/lib/ws/reducer";
+import { splitTags } from "@/lib/tags";
 import { cn } from "@/lib/utils";
 
 function time(iso: string | null | undefined): string {
@@ -71,6 +74,40 @@ function AiFrame({
   );
 }
 
+/** Message text with @ai / @skip / @off rendered as tag chips. */
+export function TaggedText({ text }: { text: string }) {
+  return (
+    <>
+      {splitTags(text).map((seg, i) =>
+        seg.tag ? (
+          <span key={i} data-tag={seg.tag} className="rounded bg-foreground/10 px-1 font-medium text-foreground">
+            {seg.text}
+          </span>
+        ) : (
+          seg.text
+        ),
+      )}
+    </>
+  );
+}
+
+/** Says why a human message got no reply: @skip/tags-mode context, or @off. */
+export function IntentBadge({ intent }: { intent: ChatMessage["intent"] }) {
+  if (intent === "context")
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <MessageSquareOff className="size-3" aria-hidden /> No reply · the AI can see this
+      </span>
+    );
+  if (intent === "off")
+    return (
+      <span className="mt-1 inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+        <EyeOff className="size-3" aria-hidden /> Off the record · hidden from the AI
+      </span>
+    );
+  return null;
+}
+
 function HumanMessage({
   m,
   mine,
@@ -101,10 +138,16 @@ function HumanMessage({
           className={cn(
             "whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[15px] leading-relaxed",
             mine ? "rounded-tr-sm bg-primary/15 text-foreground" : "rounded-tl-sm bg-muted",
+            m.intent === "off" && "border border-dashed border-amber-500/50",
           )}
         >
-          {m.status === "deleted" ? <em className="text-muted-foreground">Message deleted</em> : m.content}
+          {m.status === "deleted" ? (
+            <em className="text-muted-foreground">Message deleted</em>
+          ) : (
+            <TaggedText text={m.content} />
+          )}
         </div>
+        {m.status !== "deleted" && <IntentBadge intent={m.intent} />}
         {queued && (
           <span className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="size-3" aria-hidden />
@@ -140,7 +183,7 @@ function SendingMessage({
       <span className="size-7 shrink-0" aria-hidden />
       <div className="flex max-w-[85%] flex-col items-end">
         <div className="whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-primary/10 px-3.5 py-2 text-[15px]">
-          {p.content}
+          <TaggedText text={p.content} />
         </div>
         {p.state === "sending" ? (
           <span className="mt-1 text-xs text-muted-foreground">Sending…</span>

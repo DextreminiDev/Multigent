@@ -51,6 +51,8 @@ class ChatView(BaseModel):
     context_window: int | None = None
     max_output_limit: int | None = None
     limits_source: Literal["provider", "litellm", "default"] | None = None
+    # "always": every untagged message gets a reply; "tags": only @ai messages do
+    reply_mode: Literal["always", "tags"] = "always"
 
 
 class ChatCreate(BaseModel):
@@ -64,6 +66,7 @@ class ChatPatch(BaseModel):
     max_output_tokens: int | None = Field(default=None, ge=16, le=65536)
     daily_token_cap: int | None = Field(default=None, ge=1)
     rpm_limit: int | None = Field(default=None, ge=1, le=600)
+    reply_mode: Literal["always", "tags"] | None = None
 
     @field_validator("title")
     @classmethod
@@ -103,6 +106,8 @@ class MessageView(BaseModel):
     author_color: str | None = None
     content: str
     status: str
+    # human messages: "reply" (asks the AI), "context" (@skip / tags mode), "off" (@off)
+    intent: Literal["reply", "context", "off"] | None = None
     turn_id: uuid.UUID | None
     created_at: dt.datetime
     client_msg_id: uuid.UUID | None = None

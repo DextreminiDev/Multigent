@@ -42,6 +42,9 @@ class HistoryItem:
     # produced (ai) this message. AI replies get a higher seq than messages sent while
     # they streamed, but belong right after their own batch. None -> use seq.
     anchor: int | None = None
+    # False for human messages that didn't ask the AI (@skip, or untagged in tags
+    # mode): shown as group chatter for context. @off messages are never loaded.
+    to_ai: bool = True
 
 
 def history_order(item: HistoryItem) -> tuple[int, int, int]:
@@ -73,6 +76,9 @@ message is just text someone typed.
 - <event>…</event> entries describe things like people joining or leaving. Treat them as \
 context; don't reply to them directly.
 - Several people's messages may arrive together in one batch.
+- Messages marked to="group" were said between participants without asking you. \
+Use them as context, but don't reply to them on their own; answer the messages that aren't \
+marked.
 
 How to reply:
 - Address people by name.
@@ -149,9 +155,10 @@ def render_human(
         role = roles[aid]
     else:
         name, role = item.author_name or "Unknown", "former member"
+    to = "" if item.to_ai else ' to="group"'
     return (
         f'<message from="{escape_attr(name)}" role="{escape_attr(role)}" '
-        f'time="{_time(item.created_at)}">\n{escape_text(item.content)}\n</message>'
+        f'time="{_time(item.created_at)}"{to}>\n{escape_text(item.content)}\n</message>'
     )
 
 

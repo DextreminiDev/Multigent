@@ -601,6 +601,8 @@ export interface components {
             max_output_tokens?: number | null;
             /** Model */
             model?: string | null;
+            /** Reply Mode */
+            reply_mode?: ("always" | "tags") | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Title */
@@ -652,6 +654,12 @@ export interface components {
             owner: components["schemas"]["UserRef"];
             /** Provider */
             provider: string | null;
+            /**
+             * Reply Mode
+             * @default always
+             * @enum {string}
+             */
+            reply_mode: "always" | "tags";
             /**
              * Role
              * @enum {string}
@@ -905,6 +913,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Intent */
+            intent?: ("reply" | "context" | "off") | null;
             /**
              * Kind
              * @enum {string}
