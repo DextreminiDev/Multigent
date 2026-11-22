@@ -102,7 +102,6 @@ def chat_view(
         context_window=chat.context_window,
         max_output_limit=chat.max_output_limit,
         limits_source=chat.limits_source,
-        reply_mode=chat.reply_mode,
     )
 
 

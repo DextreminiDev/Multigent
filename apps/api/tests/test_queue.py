@@ -23,7 +23,7 @@ from app.turns.runner import TurnRunner
 from app.turns.schedule import DUE_KEY
 from app.turns.sweeper import LEADER_KEY, Sweeper
 from app.worker import Worker
-from tests.conftest import LoginFn, StubValidator, UserClient, ready_chat
+from tests.conftest import LoginFn, StubValidator, UserClient, ask_ai, ready_chat
 
 pytestmark = pytest.mark.integration
 SM = async_sessionmaker[AsyncSession]
@@ -31,7 +31,7 @@ SM = async_sessionmaker[AsyncSession]
 
 async def send(u: UserClient, cid: str, text: str) -> dict[str, Any]:
     r = await u.post(
-        f"/chats/{cid}/messages", json={"client_msg_id": str(uuid.uuid4()), "content": text}
+        f"/chats/{cid}/messages", json={"client_msg_id": str(uuid.uuid4()), **ask_ai(text)}
     )
     assert r.status_code == 201, r.text
     return r.json()["message"]  # type: ignore[no-any-return]

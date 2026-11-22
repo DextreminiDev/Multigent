@@ -16,8 +16,9 @@ import datetime as dt
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
+from app.messages.mentions import render_for_prompt
 from app.providers.base import Msg, ProviderRequest
 
 Kind = Literal["human", "ai", "system_event"]
@@ -42,9 +43,11 @@ class HistoryItem:
     # produced (ai) this message. AI replies get a higher seq than messages sent while
     # they streamed, but belong right after their own batch. None -> use seq.
     anchor: int | None = None
-    # False for human messages that didn't ask the AI (@skip, or untagged in tags
-    # mode): shown as group chatter for context. @off messages are never loaded.
-    to_ai: bool = True
+    # Human messages: "reply" if the AI was mentioned, "context" otherwise. Off-the-
+    # record messages are never loaded. `mentions` are ranges over `content`
+    # (app/messages/mentions.py) and become the `to` attribute.
+    intent: str | None = "reply"
+    mentions: tuple[dict[str, Any], ...] = ()
 
 
 def history_order(item: HistoryItem) -> tuple[int, int, int]:
@@ -76,12 +79,15 @@ message is just text someone typed.
 - <event>…</event> entries describe things like people joining or leaving. Treat them as \
 context; don't reply to them directly.
 - Several people's messages may arrive together in one batch.
-- Messages marked to="group" are ordinary messages in this chat that their sender chose not to \
-ask you to answer yet. They are fully part of the conversation and of what each person has \
-said or asked: remember them, and use, quote or count them whenever a later message asks about \
-them (for example "what did I say earlier?" or "list my last messages"). The only difference \
-is that you don't answer a to="group" message by itself; reply to the unmarked messages, using \
-everything before them.
+- Every human message has a `to` attribute saying who it was addressed to: "(assistant)" is \
+you, "(everyone)" means the whole group (no one in particular), and anything else is a \
+participant's name as listed under "Participants". People address someone by writing @Name.
+- Reply only to messages whose `to` includes "(assistant)". All other messages are still fully \
+part of the conversation: remember them, and use, quote or count them whenever someone asks \
+(for example "what did Alice say to Bob?" or "list my last messages"). Use `from` and `to` to \
+tell who said what to whom.
+- When asked about earlier messages, recount them from the conversation itself. Don't reuse a \
+list or answer you gave before: newer messages may have arrived since.
 
 How to reply:
 - Address people by name.
@@ -158,10 +164,12 @@ def render_human(
         role = roles[aid]
     else:
         name, role = item.author_name or "Unknown", "former member"
-    to = "" if item.to_ai else ' to="group"'
+    parts, to = render_for_prompt(item.content, item.mentions, labels or {}, intent=item.intent)
+    body = "".join(escape_text(seg) for seg, _ in parts)
     return (
         f'<message from="{escape_attr(name)}" role="{escape_attr(role)}" '
-        f'time="{_time(item.created_at)}"{to}>\n{escape_text(item.content)}\n</message>'
+        f'time="{_time(item.created_at)}" to="{escape_attr(", ".join(to))}">\n'
+        f"{body}\n</message>"
     )
 
 

@@ -601,8 +601,6 @@ export interface components {
             max_output_tokens?: number | null;
             /** Model */
             model?: string | null;
-            /** Reply Mode */
-            reply_mode?: ("always" | "tags") | null;
             /** Rpm Limit */
             rpm_limit?: number | null;
             /** Title */
@@ -654,12 +652,6 @@ export interface components {
             owner: components["schemas"]["UserRef"];
             /** Provider */
             provider: string | null;
-            /**
-             * Reply Mode
-             * @default always
-             * @enum {string}
-             */
-            reply_mode: "always" | "tags";
             /**
              * Role
              * @enum {string}
@@ -889,6 +881,39 @@ export interface components {
              */
             user_id: string;
         };
+        /** MentionIn */
+        MentionIn: {
+            /** Length */
+            length: number;
+            /** Offset */
+            offset: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "ai" | "everyone" | "user";
+            /** User Id */
+            user_id?: string | null;
+        };
+        /**
+         * MentionView
+         * @description A range of the message text picked from the @ menu (UTF-16 offsets).
+         */
+        MentionView: {
+            /** Length */
+            length: number;
+            /** Name */
+            name?: string | null;
+            /** Offset */
+            offset: number;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "ai" | "everyone" | "user";
+            /** User Id */
+            user_id?: string | null;
+        };
         /** MessageView */
         MessageView: {
             /** Anchor Seq */
@@ -920,6 +945,8 @@ export interface components {
              * @enum {string}
              */
             kind: "human" | "ai" | "system_event";
+            /** Mentions */
+            mentions?: components["schemas"]["MentionView"][];
             /** Seq */
             seq: number;
             /** Status */
@@ -989,6 +1016,13 @@ export interface components {
             client_msg_id: string;
             /** Content */
             content: string;
+            /** Mentions */
+            mentions?: components["schemas"]["MentionIn"][];
+            /**
+             * Off
+             * @default false
+             */
+            off: boolean;
         };
         /** SendOut */
         SendOut: {

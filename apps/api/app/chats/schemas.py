@@ -51,8 +51,6 @@ class ChatView(BaseModel):
     context_window: int | None = None
     max_output_limit: int | None = None
     limits_source: Literal["provider", "litellm", "default"] | None = None
-    # "always": every untagged message gets a reply; "tags": only @ai messages do
-    reply_mode: Literal["always", "tags"] = "always"
 
 
 class ChatCreate(BaseModel):
@@ -66,7 +64,6 @@ class ChatPatch(BaseModel):
     max_output_tokens: int | None = Field(default=None, ge=16, le=65536)
     daily_token_cap: int | None = Field(default=None, ge=1)
     rpm_limit: int | None = Field(default=None, ge=1, le=600)
-    reply_mode: Literal["always", "tags"] | None = None
 
     @field_validator("title")
     @classmethod
@@ -96,6 +93,16 @@ class KeyIn(BaseModel):
         return SecretStr(raw)
 
 
+class MentionView(BaseModel):
+    """A range of the message text picked from the @ menu (UTF-16 offsets)."""
+
+    type: Literal["ai", "everyone", "user"]
+    offset: int
+    length: int
+    user_id: uuid.UUID | None = None
+    name: str | None = None  # the user's name when the message was sent
+
+
 class MessageView(BaseModel):
     id: uuid.UUID
     seq: int
@@ -106,8 +113,9 @@ class MessageView(BaseModel):
     author_color: str | None = None
     content: str
     status: str
-    # human messages: "reply" (asks the AI), "context" (@skip / tags mode), "off" (@off)
+    # human messages: "reply" (mentions the AI), "context" (doesn't), "off" (off the record)
     intent: Literal["reply", "context", "off"] | None = None
+    mentions: list[MentionView] = Field(default_factory=list)
     turn_id: uuid.UUID | None
     created_at: dt.datetime
     client_msg_id: uuid.UUID | None = None

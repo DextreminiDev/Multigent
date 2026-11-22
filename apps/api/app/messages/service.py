@@ -18,11 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chats.permissions import Action
 from app.chats.service import require
-from app.db.models import Message, User
+from app.db.models import ChatMember, Message, User
 from app.errors import ApiError
 from app.events import Outbox, allocate_seq
 from app.ids import uuid7
-from app.messages.tags import parse_intent
+from app.messages.mentions import MentionIn, intent_for, normalize
 from app.turns.schedule import wake
 from app.usage.service import take_message_token, tokens_used
 from app.users.names import avatar_color
@@ -46,6 +46,7 @@ def message_payload(
         "content": "" if m.status == "deleted" else m.content,
         "status": m.status,
         "intent": m.intent,
+        "mentions": list(m.mentions or []),
         "turn_id": str(m.turn_id) if m.turn_id else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
@@ -70,6 +71,15 @@ def validate_content(content: str) -> str:
     return content.strip("\n")
 
 
+async def _member_names(db: AsyncSession, chat_id: uuid.UUID) -> dict[uuid.UUID, str]:
+    rows = await db.execute(
+        select(User.id, User.name)
+        .join(ChatMember, ChatMember.user_id == User.id)
+        .where(ChatMember.chat_id == chat_id, ChatMember.removed_at.is_(None))
+    )
+    return {uid: name for uid, name in rows.all()}
+
+
 async def _existing(db: AsyncSession, chat_id: uuid.UUID, cmid: uuid.UUID) -> Message | None:
     return await db.scalar(
         select(Message).where(Message.chat_id == chat_id, Message.client_msg_id == cmid)
@@ -85,17 +95,22 @@ async def send_message(
     client_msg_id: uuid.UUID,
     content: str,
     debounce_ms: int,
+    mentions: list[MentionIn] | None = None,
+    off: bool = False,
     rate_per_min: int = 6,
     chat_rate_per_min: int = 30,
 ) -> SendResult:
-    """Intent comes from the tags and the chat's reply mode (app/messages/tags.py).
-    Only "reply" messages wake the turn engine and use the AI rate limit and the
-    member's token cap; "context"/"off" messages are stored as done right away."""
+    """Intent comes from the mentions and the off-the-record flag
+    (app/messages/mentions.py). Only "reply" messages (the AI is mentioned) wake the
+    turn engine and use the AI rate limit and the member's token cap; "context"/"off"
+    messages are stored as done right away."""
     content = validate_content(content)
     m = await require(db, chat_id, user.id, Action.SEND)
     if (prior := await _existing(db, chat_id, client_msg_id)) is not None:
         return SendResult(prior, created=False)  # retries never cost a rate-limit token
-    intent = parse_intent(content, m.chat.reply_mode)
+    names = await _member_names(db, chat_id)
+    kept = normalize(content, mentions or [], sender_id=user.id, members=names)
+    intent = intent_for(kept, off=off)
     asks_ai = intent == "reply"
     if asks_ai:
         wait = await take_message_token(redis, chat_id, user.id, rate_per_min)
@@ -115,7 +130,7 @@ async def send_message(
             403,
             "member_cap",
             "You've used your daily token allowance in this chat. It resets at 00:00 UTC."
-            " You can still chat with @skip or @off.",
+            " You can still chat; just don't mention the AI.",
         )
 
     outbox = Outbox()
@@ -133,6 +148,7 @@ async def send_message(
             client_msg_id=client_msg_id,
             status="pending" if asks_ai else "done",
             intent=intent,
+            mentions=kept,
             created_at=dt.datetime.now(dt.UTC),
         )
         db.add(msg)

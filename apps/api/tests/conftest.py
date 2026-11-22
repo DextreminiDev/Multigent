@@ -238,6 +238,12 @@ def runner(app: FastAPI, providers: ProviderRegistry) -> TurnRunner:
     )
 
 
+def ask_ai(text: str) -> dict[str, Any]:
+    """Message fields that mention the AI, as if "@AI" was picked from the @ menu.
+    Only messages that mention the AI get a reply (app/messages/mentions.py)."""
+    return {"content": f"@AI {text}", "mentions": [{"type": "ai", "offset": 0, "length": 3}]}
+
+
 async def ready_chat(
     owner: UserClient, validator: StubValidator, key: str = "demo-key-1234"
 ) -> str:

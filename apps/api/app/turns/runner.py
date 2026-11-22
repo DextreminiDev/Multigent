@@ -446,7 +446,8 @@ class TurnRunner:
                     author_id=m.author_id,
                     author_name=m.author_name_snapshot,
                     anchor=anchor,
-                    to_ai=m.intent != "context",
+                    intent=m.intent,
+                    mentions=tuple(m.mentions or ()),
                 )
                 for m, anchor in reversed(rows)
             ]

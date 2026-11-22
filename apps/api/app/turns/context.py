@@ -95,6 +95,8 @@ the full transcript.
 
 Requirements:
 - Attribute everything by name (e.g. "Alice asked…", "Bob decided…").
+- Keep who said what to whom (each message's `to`), so questions like "what did Alice ask \
+Bob?" stay answerable from the summary.
 - Preserve: open questions and unresolved requests (who is waiting on what), \
 decisions made, facts and preferences people stated about themselves or the task, \
 and anything the assistant promised to do.

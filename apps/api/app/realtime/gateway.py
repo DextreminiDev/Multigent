@@ -35,6 +35,7 @@ from app.chats.service import load_membership
 from app.db.models import ChatEvent, Turn, User
 from app.errors import ApiError
 from app.logging import get_logger
+from app.messages.mentions import MAX_MENTIONS, MentionIn
 from app.messages.service import MAX_MESSAGE_CHARS, message_payload, send_message
 from app.realtime.hub import Hub, HubEvent
 from app.realtime.presence import set_typing
@@ -80,6 +81,8 @@ class SendIn(Frame):
     chat_id: uuid.UUID
     client_msg_id: uuid.UUID
     content: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+    mentions: list[MentionIn] = Field(default_factory=list, max_length=MAX_MENTIONS)
+    off: bool = False
 
 
 @dataclass
@@ -340,6 +343,8 @@ async def _send(conn: Connection, msg: SendIn) -> None:
             user=conn.user,
             client_msg_id=msg.client_msg_id,
             content=msg.content,
+            mentions=msg.mentions,
+            off=msg.off,
             debounce_ms=app.state.settings.debounce_ms,
             rate_per_min=app.state.settings.message_rate_per_min,
             chat_rate_per_min=app.state.settings.chat_rate_per_min,

@@ -31,7 +31,7 @@ from app.turns.lock import lock_key
 from app.turns.runner import TurnRunner, buffer_key
 from app.turns.schedule import DUE_KEY
 from app.worker import Worker
-from tests.conftest import LoginFn, StubValidator, UserClient, ready_chat
+from tests.conftest import LoginFn, StubValidator, UserClient, ask_ai, ready_chat
 
 pytestmark = pytest.mark.integration
 
@@ -40,7 +40,7 @@ SM = async_sessionmaker[AsyncSession]
 
 async def send(u: UserClient, cid: str, text: str, cmid: str | None = None) -> dict[str, Any]:
     r = await u.post(
-        f"/chats/{cid}/messages", json={"client_msg_id": cmid or str(uuid.uuid4()), "content": text}
+        f"/chats/{cid}/messages", json={"client_msg_id": cmid or str(uuid.uuid4()), **ask_ai(text)}
     )
     assert r.status_code in (200, 201), r.text
     return r.json()  # type: ignore[no-any-return]
@@ -97,7 +97,10 @@ async def test_send_creates_pending_message_event_and_wakeup(
     assert body["created"] is True
     assert msg["status"] == "pending"
     assert msg["author_name"] == "Alice"
-    assert msg["content"] == "  hello  "  # inner whitespace kept, trailing newlines stripped
+    assert msg["content"] == "@AI   hello  "  # inner whitespace kept, trailing newlines stripped
+    assert msg["intent"] == "reply"
+    [mention] = msg["mentions"]
+    assert (mention["type"], mention["offset"], mention["length"]) == ("ai", 0, 3)
     evs = await events(sessionmaker, cid)
     assert evs[-1][1] == "message.created"
     assert evs[-1][0] == msg["seq"]
@@ -258,7 +261,11 @@ async def test_message_during_running_turn_is_answered_next_exactly_once(
     await runner.run_chat(uuid.UUID(cid))
 
     t1, t2 = await turns(sessionmaker, cid)
-    msgs = {m.content: m for m in await messages(sessionmaker, cid) if m.kind == "human"}
+    msgs = {
+        m.content.removeprefix("@AI "): m
+        for m in await messages(sessionmaker, cid)
+        if m.kind == "human"
+    }
     assert msgs["first"].turn_id == t1.id
     assert msgs["second"].turn_id == t2.id
     assert all(m.status == "done" for m in msgs.values())

@@ -87,7 +87,6 @@ class Chat(Base):
     __tablename__ = "chats"
     __table_args__ = (
         CheckConstraint("status IN ('active','paused_key','paused_cap','archived')", name="status"),
-        CheckConstraint("reply_mode IN ('always','tags')", name="reply_mode"),
     )
     id: Mapped[uuid.UUID] = _pk()
     owner_id: Mapped[uuid.UUID] = _fk("users.id")
@@ -107,8 +106,6 @@ class Chat(Base):
     limits_source: Mapped[str | None] = mapped_column(Text)
     # Proactive requests/minute ceiling for the owner's key (None = provider default).
     rpm_limit: Mapped[int | None] = mapped_column(Integer)
-    # "always": every message gets an AI reply; "tags": only messages tagged @ai do.
-    reply_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default="always")
     created_at: Mapped[dt.datetime] = _ts()
     updated_at: Mapped[dt.datetime] = _ts()
 
@@ -200,10 +197,16 @@ class Message(Base):
     author_name_snapshot: Mapped[str | None] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     client_msg_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
-    # Human messages only. reply: asks the AI (queued); context: the AI sees it later
-    # but doesn't answer it (@skip, or untagged in tags mode); off: humans only, never
-    # sent to the AI (@off). Decided server-side from the tags at send time.
+    # Human messages only (app/messages/mentions.py). reply: mentions the AI, so it's
+    # queued for an answer; context: the AI sees it but doesn't answer it; off: off
+    # the record, never sent to the AI. Decided server-side at send time.
     intent: Mapped[str | None] = mapped_column(Text)
+    # Mentions as ranges over `content` (UTF-16 offsets, like the browser):
+    # [{type: "ai"|"everyone"|"user", offset, length, user_id?, name?}]; name is the
+    # mentioned user's name at send time.
+    mentions: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     turn_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),

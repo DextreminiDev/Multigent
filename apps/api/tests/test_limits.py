@@ -32,7 +32,7 @@ from app.turns.runner import Claim, TurnRunner, rpm_key
 from app.turns.schedule import DUE_KEY
 from app.turns.sweeper import Sweeper
 from app.usage.service import estimate_cost, split_tokens
-from tests.conftest import LoginFn, StubValidator, UserClient, ready_chat
+from tests.conftest import LoginFn, StubValidator, UserClient, ask_ai, ready_chat
 
 SM = async_sessionmaker[AsyncSession]
 T0 = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
@@ -130,7 +130,7 @@ def test_usage_split_and_cost() -> None:
 
 async def send(u: UserClient, cid: str, text: str) -> Any:
     return await u.post(
-        f"/chats/{cid}/messages", json={"client_msg_id": str(uuid.uuid4()), "content": text}
+        f"/chats/{cid}/messages", json={"client_msg_id": str(uuid.uuid4()), **ask_ai(text)}
     )
 
 
@@ -203,7 +203,7 @@ async def test_long_chat_is_compacted_into_a_rolling_summary(
 ) -> None:
     owner = await login("Alice")
     cid = await ready_chat(owner, validator)
-    await set_chat(sessionmaker, cid, context_window=900, max_output_tokens=64)
+    await set_chat(sessionmaker, cid, context_window=1100, max_output_tokens=64)
     for i in range(8):
         r = await send(owner, cid, f"Question {i}: " + "lorem ipsum dolor sit amet " * 12)
         assert r.status_code == 201
@@ -237,7 +237,7 @@ async def test_long_chat_is_compacted_into_a_rolling_summary(
     raw = await redis.get(f"chat:{cid}:context")
     assert raw is not None
     ctx = json.loads(raw)
-    assert ctx["window"] == 900
+    assert ctx["window"] == 1100
     assert 0 < ctx["percent"] <= 120
     got = (await owner.get(f"/chats/{cid}/context")).json()
     assert got["summary"]["covers_through_seq"] == summaries[-1].covers_through_seq

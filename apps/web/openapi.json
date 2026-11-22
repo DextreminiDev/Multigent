@@ -123,21 +123,6 @@
             ],
             "title": "Model"
           },
-          "reply_mode": {
-            "anyOf": [
-              {
-                "enum": [
-                  "always",
-                  "tags"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply Mode"
-          },
           "rpm_limit": {
             "anyOf": [
               {
@@ -334,15 +319,6 @@
               }
             ],
             "title": "Provider"
-          },
-          "reply_mode": {
-            "default": "always",
-            "enum": [
-              "always",
-              "tags"
-            ],
-            "title": "Reply Mode",
-            "type": "string"
           },
           "role": {
             "enum": [
@@ -1017,6 +993,101 @@
         "title": "MemberView",
         "type": "object"
       },
+      "MentionIn": {
+        "properties": {
+          "length": {
+            "maximum": 200.0,
+            "minimum": 1.0,
+            "title": "Length",
+            "type": "integer"
+          },
+          "offset": {
+            "minimum": 0.0,
+            "title": "Offset",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "ai",
+              "everyone",
+              "user"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "type",
+          "offset",
+          "length"
+        ],
+        "title": "MentionIn",
+        "type": "object"
+      },
+      "MentionView": {
+        "description": "A range of the message text picked from the @ menu (UTF-16 offsets).",
+        "properties": {
+          "length": {
+            "title": "Length",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "ai",
+              "everyone",
+              "user"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "type",
+          "offset",
+          "length"
+        ],
+        "title": "MentionView",
+        "type": "object"
+      },
       "MessageView": {
         "properties": {
           "anchor_seq": {
@@ -1107,6 +1178,13 @@
             ],
             "title": "Kind",
             "type": "string"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/MentionView"
+            },
+            "title": "Mentions",
+            "type": "array"
           },
           "seq": {
             "title": "Seq",
@@ -1319,6 +1397,19 @@
             "minLength": 1,
             "title": "Content",
             "type": "string"
+          },
+          "mentions": {
+            "items": {
+              "$ref": "#/components/schemas/MentionIn"
+            },
+            "maxItems": 50,
+            "title": "Mentions",
+            "type": "array"
+          },
+          "off": {
+            "default": false,
+            "title": "Off",
+            "type": "boolean"
           }
         },
         "required": [

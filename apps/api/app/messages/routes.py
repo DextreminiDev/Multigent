@@ -15,6 +15,7 @@ from app.chats.schemas import MessageView
 from app.chats.service import require
 from app.db.models import Chat, Message, Turn, TurnMessage
 from app.deps import AuthDep, CsrfAuthDep, DbDep, RedisDep, SettingsDep
+from app.messages.mentions import MAX_MENTIONS, MentionIn
 from app.messages.service import (
     MAX_MESSAGE_CHARS,
     message_payload,
@@ -30,6 +31,9 @@ STATE_PAGE = 50
 class SendIn(BaseModel):
     client_msg_id: uuid.UUID
     content: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
+    # picked from the @ menu; only a mention of the AI asks for a reply
+    mentions: list[MentionIn] = Field(default_factory=list, max_length=MAX_MENTIONS)
+    off: bool = False  # off the record: never shown to the AI
 
 
 class SendOut(BaseModel):
@@ -73,6 +77,8 @@ async def post_message(
         user=auth.user,
         client_msg_id=body.client_msg_id,
         content=body.content,
+        mentions=body.mentions,
+        off=body.off,
         debounce_ms=settings.debounce_ms,
         rate_per_min=settings.message_rate_per_min,
         chat_rate_per_min=settings.chat_rate_per_min,

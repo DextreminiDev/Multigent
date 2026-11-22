@@ -49,9 +49,10 @@ def test_batch_of_two_people_is_one_user_message_in_order() -> None:
     )
     assert [m.role for m in req.messages] == ["user"]
     assert req.messages[0].content == (
-        '<message from="Alice" role="owner" time="14:02">\n'
+        '<message from="Alice" role="owner" time="14:02" to="(assistant)">\n'
         "How do I reverse a list in Python?\n</message>\n\n"
-        '<message from="Bob" role="editor" time="14:02">\nExplain Big-O notation\n</message>'
+        '<message from="Bob" role="editor" time="14:02" to="(assistant)">\n'
+        "Explain Big-O notation\n</message>"
     )
 
 
@@ -132,7 +133,8 @@ def test_content_cannot_forge_tags(payload: str) -> None:
 def test_names_cannot_break_attributes(name: str) -> None:
     out = render_history([human(1, BOB, name, "hi")], PEOPLE)[0].content
     head = out.split("\n", 1)[0]
-    assert re.fullmatch(r'<message from="[^"<>\n]*" role="editor" time="14:02">', head), head
+    pattern = r'<message from="[^"<>\n]*" role="editor" time="14:02" to="\(assistant\)">'
+    assert re.fullmatch(pattern, head), head
     assert "\n" not in escape_attr(name)
 
 

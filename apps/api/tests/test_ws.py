@@ -23,7 +23,7 @@ from app.db.models import Chat, ChatEvent, ChatMember
 from app.providers.fake import FakeScript
 from app.providers.registry import ProviderRegistry
 from app.turns.runner import TurnRunner
-from tests.conftest import StubValidator
+from tests.conftest import StubValidator, ask_ai
 
 pytestmark = pytest.mark.integration
 ORIGIN = "http://localhost:3000"
@@ -243,18 +243,18 @@ async def test_send_and_stream_live(
 
     cmid = str(uuid.uuid4())
     ack = await owner.ack(
-        await owner.send("message.send", chat_id=cid, client_msg_id=cmid, content="hi everyone")
+        await owner.send("message.send", chat_id=cid, client_msg_id=cmid, **ask_ai("hi everyone"))
     )
     assert ack["created"] is True
     assert ack["message"]["client_msg_id"] == cmid
     dup = await owner.ack(
-        await owner.send("message.send", chat_id=cid, client_msg_id=cmid, content="hi everyone")
+        await owner.send("message.send", chat_id=cid, client_msg_id=cmid, **ask_ai("hi everyone"))
     )
     assert dup["created"] is False
     assert dup["message"]["id"] == ack["message"]["id"]
 
     created = await viewer.until(lambda f: f["type"] == "message.created")
-    assert created["payload"]["message"]["content"] == "hi everyone"
+    assert created["payload"]["message"]["content"] == "@AI hi everyone"
 
     await runner.run_chat(uuid.UUID(cid))
     done = await viewer.until(lambda f: f["type"] == "turn.completed")
@@ -270,7 +270,7 @@ async def test_send_and_stream_live(
 
     # viewers can watch but not send
     ref = await viewer.send(
-        "message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), content="me too"
+        "message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), **ask_ai("me too")
     )
     assert (await viewer.until(lambda f: f.get("ref") == ref))["code"] == "forbidden"
 
@@ -295,7 +295,9 @@ async def test_join_mid_stream_gets_snapshot_then_live_without_gaps(
     await owner.connect()
     ack = await owner.ack(await owner.send("subscribe", chat_id=cid, after_seq=0))
     await owner.ack(
-        await owner.send("message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), content="go")
+        await owner.send(
+            "message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), **ask_ai("go")
+        )
     )
     task = asyncio.create_task(runner.run_chat(uuid.UUID(cid)))
     for _ in range(3):
@@ -446,7 +448,9 @@ async def test_cancel_over_websocket(
     await owner.connect()
     await owner.ack(await owner.send("subscribe", chat_id=cid, after_seq=0))
     await owner.ack(
-        await owner.send("message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), content="go")
+        await owner.send(
+            "message.send", chat_id=cid, client_msg_id=str(uuid.uuid4()), **ask_ai("go")
+        )
     )
     task = asyncio.create_task(runner.run_chat(uuid.UUID(cid)))
     started = await owner.until(lambda f: f["type"] == "turn.started")
